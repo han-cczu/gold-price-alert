@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gold-price-alert"
+version = "0.1.0"
+description = "金价实时监控与智能分析系统"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "sqlalchemy>=2.0",
+    "apscheduler>=3.10",
+    "rich>=13.0",
+    "httpx>=0.25",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "aiohttp>=3.9",
+    "anthropic>=0.18",
+    "openai>=1.10",
+    "fastapi>=0.109",
+    "uvicorn>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[project.scripts]
+gold-monitor = "gold_monitor.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,71 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 虚拟环境
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 环境配置（包含敏感信息）
+.env
+.env.local
+.env.*.local
+
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# 日志文件
+*.log
+logs/
+
+# SSL 证书
+ssl/
+*.pem
+*.key
+*.crt
+
+# 测试
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+nul
+
+# 备份文件
+backup/
+*.bak

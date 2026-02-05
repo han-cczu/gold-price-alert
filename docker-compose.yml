@@ -1,0 +1,113 @@
+# 金价实时监控系统 - Docker Compose 配置
+# 使用方法: docker-compose up -d
+
+version: '3.8'
+
+services:
+  # ============ 主应用服务 ============
+  gold-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gold-monitor
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # 持久化数据库
+      - gold_data:/app/data
+      # 可选：挂载配置文件
+      # - ./.env:/app/.env:ro
+    environment:
+      # 数据源配置
+      - GOLD_DATA_SOURCE=${GOLD_DATA_SOURCE:-mock}
+      - GOLD_FETCH_INTERVAL=${GOLD_FETCH_INTERVAL:-30}
+      - GOLD_DATABASE_URL=sqlite:///data/gold_prices.db
+      
+      # 告警配置
+      - GOLD_ALERT_THRESHOLD_PERCENT=${GOLD_ALERT_THRESHOLD_PERCENT:-1.0}
+      - GOLD_ALERT_PRICE_UPPER=${GOLD_ALERT_PRICE_UPPER:-2500.0}
+      - GOLD_ALERT_PRICE_LOWER=${GOLD_ALERT_PRICE_LOWER:-1800.0}
+      
+      # 大模型配置
+      - GOLD_LLM_PROVIDER=${GOLD_LLM_PROVIDER:-mock}
+      - GOLD_ANTHROPIC_API_KEY=${GOLD_ANTHROPIC_API_KEY:-}
+      - GOLD_OPENAI_API_KEY=${GOLD_OPENAI_API_KEY:-}
+      - GOLD_OPENAI_BASE_URL=${GOLD_OPENAI_BASE_URL:-}
+      
+      # GoldAPI 配置（可选）
+      - GOLD_GOLDAPI_KEY=${GOLD_GOLDAPI_KEY:-}
+      
+      # 通知配置（可选）
+      - GOLD_SMTP_HOST=${GOLD_SMTP_HOST:-}
+      - GOLD_SMTP_PORT=${GOLD_SMTP_PORT:-587}
+      - GOLD_SMTP_USERNAME=${GOLD_SMTP_USERNAME:-}
+      - GOLD_SMTP_PASSWORD=${GOLD_SMTP_PASSWORD:-}
+      - GOLD_ALERT_EMAIL_TO=${GOLD_ALERT_EMAIL_TO:-}
+      - GOLD_WEBHOOK_URL=${GOLD_WEBHOOK_URL:-}
+      - GOLD_WEBHOOK_TYPE=${GOLD_WEBHOOK_TYPE:-generic}
+      - GOLD_TELEGRAM_BOT_TOKEN=${GOLD_TELEGRAM_BOT_TOKEN:-}
+      - GOLD_TELEGRAM_CHAT_ID=${GOLD_TELEGRAM_CHAT_ID:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - gold_network
+
+  # ============ 数据采集服务（可选，独立运行）============
+  gold-collector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gold-collector
+    restart: unless-stopped
+    command: ["gold-monitor", "monitor"]
+    volumes:
+      - gold_data:/app/data
+    environment:
+      - GOLD_DATA_SOURCE=${GOLD_DATA_SOURCE:-mock}
+      - GOLD_FETCH_INTERVAL=${GOLD_FETCH_INTERVAL:-30}
+      - GOLD_DATABASE_URL=sqlite:///data/gold_prices.db
+      - GOLD_ALERT_THRESHOLD_PERCENT=${GOLD_ALERT_THRESHOLD_PERCENT:-1.0}
+      - GOLD_ALERT_PRICE_UPPER=${GOLD_ALERT_PRICE_UPPER:-2500.0}
+      - GOLD_ALERT_PRICE_LOWER=${GOLD_ALERT_PRICE_LOWER:-1800.0}
+      - GOLD_LLM_PROVIDER=${GOLD_LLM_PROVIDER:-mock}
+      - GOLD_GOLDAPI_KEY=${GOLD_GOLDAPI_KEY:-}
+    depends_on:
+      gold-monitor:
+        condition: service_healthy
+    networks:
+      - gold_network
+    profiles:
+      - collector  # 使用 --profile collector 启用
+
+  # ============ Nginx 反向代理（生产环境）============
+  nginx:
+    image: nginx:alpine
+    container_name: gold-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro  # SSL 证书目录
+    depends_on:
+      - gold-monitor
+    networks:
+      - gold_network
+    profiles:
+      - production  # 使用 --profile production 启用
+
+# ============ 数据卷 ============
+volumes:
+  gold_data:
+    driver: local
+
+# ============ 网络 ============
+networks:
+  gold_network:
+    driver: bridge

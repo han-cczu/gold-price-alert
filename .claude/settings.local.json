@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:www.tradingview.com)",
+      "WebFetch(domain:coincodex.com)",
+      "Bash(pip install:*)",
+      "Bash(python -m gold_monitor.cli:*)",
+      "Bash(chcp:*)",
+      "Bash(PYTHONIOENCODING=utf-8 python:*)",
+      "WebFetch(domain:hjyyds.com)",
+      "Bash(dir:*)",
+      "Bash(findstr:*)"
+    ]
+  }
+}
