@@ -1,7 +1,7 @@
 """模拟数据源 - 用于开发测试"""
 
 import random
-from datetime import datetime
+from datetime import datetime, timezone
 from .base import BaseDataSource, PriceData
 
 
@@ -36,6 +36,6 @@ class MockDataSource(BaseDataSource):
         return PriceData(
             price=round(self._current_price, 2),
             currency="USD",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
             source=self.name
         )

@@ -1,8 +1,9 @@
 """大模型分析模块 - 金价波动原因分析"""
 
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from .config import settings
@@ -30,6 +31,21 @@ class AnalysisReport:
     raw_response: str
 
 
+@dataclass 
+class SmartAnalysisReport:
+    """智能分析报告（网络搜索版）"""
+    title: str  # 标题
+    market_overview: str  # 市场概况
+    recent_trend: str  # 近期走势
+    key_factors: list[str]  # 影响因素
+    price_prediction: str  # 价格预测
+    buy_timing: str  # 买入时机
+    recommendation: str  # 操作建议
+    risk_warning: str  # 风险提示
+    generated_at: datetime
+    raw_response: str
+
+
 class LLMProvider(ABC):
     """大模型提供商基类"""
 
@@ -37,6 +53,153 @@ class LLMProvider(ABC):
     async def analyze(self, context: AnalysisContext) -> AnalysisReport:
         """分析金价波动"""
         pass
+    
+    async def smart_analyze(self) -> SmartAnalysisReport:
+        """智能分析 - 让 AI 搜索网络数据进行分析"""
+        prompt = self._build_smart_prompt()
+        response = await self._call_llm(prompt)
+        return self._parse_smart_response(response)
+    
+    async def _call_llm(self, prompt: str) -> str:
+        """调用 LLM（子类实现）"""
+        raise NotImplementedError
+    
+    def _build_smart_prompt(self) -> str:
+        """构建智能分析提示词"""
+        today = datetime.now().strftime("%Y年%m月%d日")
+        return f"""你是一位专业的黄金市场分析师。今天是 {today}。
+
+请你搜索并分析最近一周的国际黄金价格走势，给出专业的市场分析报告。
+
+## 分析要求
+
+请按以下格式输出分析报告：
+
+### 📊 市场概况
+简要描述当前黄金市场的整体情况，包括最新价格、本周涨跌幅等。
+
+### 📈 近期走势
+分析最近5-7天的金价走势，包括关键价位、支撑位、阻力位等。
+
+### 🔍 影响因素
+列出3-5个影响近期金价的主要因素，如：
+- 美联储政策
+- 美元走势
+- 地缘政治
+- 通胀数据
+- 市场避险情绪等
+
+### 🔮 价格预测
+预测未来3-7天的金价走势范围，给出可能的价格区间。
+
+### ⏰ 买入时机
+分析当前是否适合买入黄金，如果不适合，什么价位适合入场。
+
+### 💡 操作建议
+给出具体的操作建议：
+- 短线操作建议
+- 中长线配置建议
+- 仓位建议
+
+### ⚠️ 风险提示
+提醒投资者注意的风险因素。
+
+请确保分析基于最新的市场数据，用中文回答，保持专业、客观的分析风格。"""
+
+    def _parse_smart_response(self, response: str) -> SmartAnalysisReport:
+        """解析智能分析响应"""
+        sections = {
+            "market_overview": "",
+            "recent_trend": "",
+            "key_factors": [],
+            "price_prediction": "",
+            "buy_timing": "",
+            "recommendation": "",
+            "risk_warning": ""
+        }
+        
+        current_section = None
+        current_content = []
+        
+        for line in response.split('\n'):
+            line_lower = line.lower()
+            
+            # 检测章节标题
+            if '市场概况' in line or 'market' in line_lower:
+                if current_section and current_content:
+                    self._save_section(sections, current_section, current_content)
+                current_section = "market_overview"
+                current_content = []
+            elif '近期走势' in line or '走势' in line:
+                if current_section and current_content:
+                    self._save_section(sections, current_section, current_content)
+                current_section = "recent_trend"
+                current_content = []
+            elif '影响因素' in line or '因素' in line:
+                if current_section and current_content:
+                    self._save_section(sections, current_section, current_content)
+                current_section = "key_factors"
+                current_content = []
+            elif '价格预测' in line or '预测' in line:
+                if current_section and current_content:
+                    self._save_section(sections, current_section, current_content)
+                current_section = "price_prediction"
+                current_content = []
+            elif '买入时机' in line or '时机' in line:
+                if current_section and current_content:
+                    self._save_section(sections, current_section, current_content)
+                current_section = "buy_timing"
+                current_content = []
+            elif '操作建议' in line or '建议' in line:
+                if current_section and current_content:
+                    self._save_section(sections, current_section, current_content)
+                current_section = "recommendation"
+                current_content = []
+            elif '风险提示' in line or '风险' in line:
+                if current_section and current_content:
+                    self._save_section(sections, current_section, current_content)
+                current_section = "risk_warning"
+                current_content = []
+            elif current_section:
+                # 跳过标题行本身
+                if not line.startswith('#'):
+                    current_content.append(line)
+        
+        # 保存最后一个章节
+        if current_section and current_content:
+            self._save_section(sections, current_section, current_content)
+        
+        # 处理影响因素列表
+        if isinstance(sections["key_factors"], str):
+            factors = []
+            for line in sections["key_factors"].split('\n'):
+                line = line.strip()
+                if line.startswith(('-', '•', '*', '·')) or (len(line) > 0 and line[0].isdigit()):
+                    factor = line.lstrip('-•*·0123456789. ').strip()
+                    if factor:
+                        factors.append(factor)
+            sections["key_factors"] = factors if factors else ["市场供需变化", "宏观经济影响", "地缘政治因素"]
+        
+        return SmartAnalysisReport(
+            title=f"黄金市场分析报告 - {datetime.now().strftime('%Y-%m-%d')}",
+            market_overview=sections["market_overview"] or "暂无数据",
+            recent_trend=sections["recent_trend"] or "暂无数据",
+            key_factors=sections["key_factors"] if isinstance(sections["key_factors"], list) else ["暂无数据"],
+            price_prediction=sections["price_prediction"] or "暂无预测",
+            buy_timing=sections["buy_timing"] or "建议观望",
+            recommendation=sections["recommendation"] or "建议谨慎操作",
+            risk_warning=sections["risk_warning"] or "投资有风险，入市需谨慎",
+            generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            raw_response=response
+        )
+    
+    def _save_section(self, sections: dict, section: str, content: list):
+        """保存章节内容"""
+        text = '\n'.join(content).strip()
+        if section == "key_factors":
+            sections[section] = text  # 后续会解析为列表
+        else:
+            sections[section] = text
 
     def _build_prompt(self, context: AnalysisContext) -> str:
         """构建分析提示词"""
@@ -121,7 +284,7 @@ class LLMProvider(ABC):
             possible_reasons=reasons[:5],
             market_sentiment=sentiment,
             recommendation=recommendation.strip() or "建议观望，等待更明确的市场信号",
-            generated_at=datetime.utcnow(),
+            generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
             raw_response=response
         )
 
@@ -129,59 +292,76 @@ class LLMProvider(ABC):
 class AnthropicProvider(LLMProvider):
     """Anthropic Claude 提供商"""
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: str | None = None, model: str | None = None):
         self.api_key = api_key or settings.anthropic_api_key
+        self.model = model or "claude-sonnet-4-20250514"
         if not self.api_key:
             raise ValueError("需要配置 Anthropic API Key")
 
-    async def analyze(self, context: AnalysisContext) -> AnalysisReport:
+    async def _call_llm(self, prompt: str) -> str:
+        """调用 Anthropic API"""
         import anthropic
-
         client = anthropic.AsyncAnthropic(api_key=self.api_key)
-        prompt = self._build_prompt(context)
-
         message = await client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1024,
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
+            model=self.model,
+            max_tokens=2048,
+            messages=[{"role": "user", "content": prompt}]
         )
+        return message.content[0].text
 
-        response_text = message.content[0].text
+    async def analyze(self, context: AnalysisContext) -> AnalysisReport:
+        prompt = self._build_prompt(context)
+        response_text = await self._call_llm(prompt)
         return self._parse_response(response_text)
 
 
 class OpenAIProvider(LLMProvider):
     """OpenAI 提供商（兼容 API）"""
 
-    def __init__(self, api_key: str | None = None, base_url: str | None = None):
+    def __init__(self, api_key: str | None = None, base_url: str | None = None, model: str | None = None):
         self.api_key = api_key or settings.openai_api_key
-        self.base_url = base_url or settings.openai_base_url or None
+        self.base_url = self._normalize_base_url(base_url or settings.openai_base_url)
+        self.model = model or "gpt-4o-mini"
         if not self.api_key:
             raise ValueError("需要配置 OpenAI API Key")
+    
+    @staticmethod
+    def _normalize_base_url(url: str | None) -> str | None:
+        """标准化 base_url，自动添加 /v1"""
+        if not url:
+            return None
+        url = url.rstrip('/')
+        # 如果 URL 不包含 /v1，自动添加
+        if not url.endswith('/v1') and '/v1' not in url:
+            url = f"{url}/v1"
+        return url
 
-    async def analyze(self, context: AnalysisContext) -> AnalysisReport:
+    async def _call_llm(self, prompt: str) -> str:
+        """调用 OpenAI API"""
         from openai import AsyncOpenAI
-
         client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
-        prompt = self._build_prompt(context)
-
         response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=self.model,
             messages=[
-                {"role": "system", "content": "你是一位专业的黄金市场分析师。"},
+                {"role": "system", "content": "你是一位专业的黄金市场分析师，具有实时获取市场数据的能力。"},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=1024
+            max_tokens=2048
         )
+        return response.choices[0].message.content
 
-        response_text = response.choices[0].message.content
+    async def analyze(self, context: AnalysisContext) -> AnalysisReport:
+        prompt = self._build_prompt(context)
+        response_text = await self._call_llm(prompt)
         return self._parse_response(response_text)
 
 
 class MockLLMProvider(LLMProvider):
     """模拟 LLM 提供商（用于测试）"""
+
+    async def _call_llm(self, prompt: str) -> str:
+        """模拟调用"""
+        return "[Mock Response]"
 
     async def analyze(self, context: AnalysisContext) -> AnalysisReport:
         direction = "上涨" if context.price_change > 0 else "下跌"
@@ -197,23 +377,80 @@ class MockLLMProvider(LLMProvider):
             ],
             market_sentiment="偏多" if context.price_change > 0 else "偏空",
             recommendation="建议关注关键支撑位，控制仓位风险",
-            generated_at=datetime.utcnow(),
+            generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
             raw_response="[Mock Response]"
+        )
+    
+    async def smart_analyze(self) -> SmartAnalysisReport:
+        """模拟智能分析"""
+        return SmartAnalysisReport(
+            title=f"黄金市场分析报告（模拟） - {datetime.now().strftime('%Y-%m-%d')}",
+            market_overview="【模拟数据】当前国际金价约 2650 美元/盎司，本周小幅震荡。",
+            recent_trend="【模拟数据】近一周金价在 2620-2680 美元区间内震荡，整体维持高位运行。",
+            key_factors=[
+                "美联储货币政策预期",
+                "美元指数走势",
+                "地缘政治紧张局势",
+                "全球央行购金需求",
+                "通胀数据影响"
+            ],
+            price_prediction="【模拟数据】预计未来一周金价将在 2600-2700 美元区间波动。",
+            buy_timing="【模拟数据】建议在金价回调至 2620 美元附近时考虑分批建仓。",
+            recommendation="【模拟数据】短线建议观望，中长线可逢低配置。建议仓位控制在总资产的 5-10%。",
+            risk_warning="此为模拟分析，请配置 AI 模型后获取真实分析。投资有风险，入市需谨慎。",
+            generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            raw_response="[Mock Smart Analysis]"
         )
 
 
 def create_llm_provider(provider: str | None = None) -> LLMProvider:
-    """创建 LLM 提供商实例"""
-    provider = provider or settings.llm_provider
-
-    if provider == "anthropic":
-        return AnthropicProvider()
-    elif provider == "openai":
-        return OpenAIProvider()
-    elif provider == "mock":
-        return MockLLMProvider()
-    else:
-        raise ValueError(f"不支持的 LLM 提供商: {provider}")
+    """创建 LLM 提供商实例（优先使用动态配置）"""
+    from .llm_config import get_llm_config_manager
+    
+    # 允许用环境变量强制指定（用于测试/部署时覆盖 Web 配置）
+    # 例如 tests/test_web.py 会设置 GOLD_LLM_PROVIDER=mock
+    if not provider:
+        env_provider = (os.getenv("GOLD_LLM_PROVIDER") or "").strip().lower()
+        if env_provider in {"mock", "anthropic", "openai"}:
+            provider = env_provider
+    
+    # 每次都重新加载配置，确保使用最新设置
+    config = get_llm_config_manager().reload_config()
+    active_provider = config.get_active_provider()
+    
+    # 如果指定了 provider 参数，使用参数
+    if provider:
+        if provider == "mock":
+            return MockLLMProvider()
+        elif provider == "anthropic":
+            return AnthropicProvider()
+        elif provider == "openai":
+            return OpenAIProvider()
+        else:
+            raise ValueError(f"不支持的 LLM 提供商: {provider}")
+    
+    # 使用当前激活的平台配置
+    if active_provider:
+        # Mock 模式
+        if active_provider.id == "mock" or not active_provider.api_key:
+            return MockLLMProvider()
+        
+        # 判断是否是 Anthropic（根据 URL 或名称）
+        if "anthropic" in active_provider.base_url.lower() or "claude" in active_provider.name.lower():
+            return AnthropicProvider(
+                api_key=active_provider.api_key,
+                model=config.active_model or None
+            )
+        
+        # 其他都当作 OpenAI 兼容接口
+        return OpenAIProvider(
+            api_key=active_provider.api_key,
+            base_url=active_provider.base_url or None,
+            model=config.active_model or None
+        )
+    
+    # 回退到 Mock
+    return MockLLMProvider()
 
 
 class GoldAnalyzer:
@@ -231,6 +468,11 @@ class GoldAnalyzer:
                 # 如果没有配置 API Key，使用 Mock
                 self._llm = MockLLMProvider()
         return self._llm
+    
+    async def smart_analyze(self) -> SmartAnalysisReport:
+        """智能分析 - AI 搜索网络数据进行分析"""
+        provider = self._get_provider()
+        return await provider.smart_analyze()
 
     async def analyze_volatility(
         self,

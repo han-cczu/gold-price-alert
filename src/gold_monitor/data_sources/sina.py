@@ -2,7 +2,7 @@
 
 import httpx
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from .base import BaseDataSource, PriceData
 
 
@@ -50,7 +50,7 @@ class SinaDataSource(BaseDataSource):
         return PriceData(
             price=round(price, 2),
             currency="USD",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
             source=self.name
         )
 

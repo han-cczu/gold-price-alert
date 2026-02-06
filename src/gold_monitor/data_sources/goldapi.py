@@ -1,7 +1,7 @@
 """GoldAPI.io 数据源"""
 
 import httpx
-from datetime import datetime
+from datetime import datetime, timezone
 from .base import BaseDataSource, PriceData
 
 
@@ -52,7 +52,7 @@ class GoldAPIDataSource(BaseDataSource):
         return PriceData(
             price=round(float(price), 2),
             currency="USD",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
             source=self.name
         )
 

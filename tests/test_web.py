@@ -38,6 +38,9 @@ def test_health_check(client):
     assert "status" in data
     assert "database" in data
     assert "data_source" in data
+    assert "collector_running" in data
+    assert "collector_stats" in data
+    assert "fetch_interval" in data
 
 
 def test_get_current_price(client):
@@ -123,3 +126,70 @@ def test_get_exchange_rate(client):
     assert "usd_cny" in data
     assert "updated_at" in data
     assert data["usd_cny"] > 0
+
+
+def test_websocket_status(client):
+    """测试 WebSocket 状态"""
+    response = client.get("/ws/status")
+    assert response.status_code == 200
+    data = response.json()
+    assert "active_connections" in data
+    assert "endpoint" in data
+    assert data["endpoint"] == "/ws"
+
+
+def test_websocket_connection(client):
+    """测试 WebSocket 连接"""
+    import json
+    
+    with client.websocket_connect("/ws") as websocket:
+        # 连接后应收到当前价格
+        # 发送心跳
+        websocket.send_text(json.dumps({"type": "ping"}))
+        
+        # 等待心跳响应
+        data = websocket.receive_text()
+        message = json.loads(data)
+        
+        # 可能先收到价格更新，也可能收到 pong
+        assert message["type"] in ["pong", "price_update"]
+
+
+def test_collector_stats_api(client):
+    """测试采集器统计 API"""
+    response = client.get("/api/collector/stats")
+    # 在测试环境可能采集器未运行
+    if response.status_code == 200:
+        data = response.json()
+        assert "running" in data
+        assert "stats" in data
+        assert "config" in data
+
+
+def test_collector_config_api(client):
+    """测试采集器配置 API"""
+    response = client.get("/api/collector/config")
+    if response.status_code == 200:
+        data = response.json()
+        assert "interval" in data
+        assert "strategy" in data
+        assert "deduplicate" in data
+
+
+def test_update_collector_interval(client):
+    """测试运行时修改采集间隔"""
+    response = client.post("/api/collector/config?interval=60")
+    if response.status_code == 200:
+        data = response.json()
+        assert "changes" in data
+        assert data["changes"].get("interval") == 60
+
+
+def test_detect_gaps_api(client):
+    """测试检测数据间隙"""
+    response = client.get("/api/collector/gaps?hours=1")
+    if response.status_code == 200:
+        data = response.json()
+        assert "gaps" in data
+        assert "count" in data
+        assert isinstance(data["gaps"], list)

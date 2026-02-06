@@ -1,7 +1,7 @@
 """大模型分析模块测试"""
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from gold_monitor.analyzer import (
     GoldAnalyzer, AnalysisReport, AnalysisContext,
@@ -18,7 +18,7 @@ def analyzer():
 @pytest.fixture
 def sample_prices():
     """生成示例价格数据"""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     prices = []
     base_price = 2000.0
     for i in range(10):
@@ -53,7 +53,7 @@ async def test_analyze_volatility_upward(analyzer, sample_prices):
 @pytest.mark.asyncio
 async def test_analyze_volatility_downward(analyzer):
     """测试下跌趋势分析"""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     prices = []
     base_price = 2050.0
     for i in range(10):
@@ -100,7 +100,7 @@ def test_format_report_markdown(analyzer):
         ],
         market_sentiment="偏多",
         recommendation="建议逢低买入",
-        generated_at=datetime.utcnow(),
+        generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
         raw_response="[Raw Response]"
     )
 
@@ -136,8 +136,8 @@ async def test_mock_provider_response():
         price_change_percent=1.0,
         time_window_minutes=5,
         recent_prices=[
-            (datetime.utcnow() - timedelta(minutes=5), 2030.0),
-            (datetime.utcnow(), 2050.0)
+            (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=5), 2030.0),
+            (datetime.now(timezone.utc).replace(tzinfo=None), 2050.0)
         ]
     )
 

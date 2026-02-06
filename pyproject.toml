@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gold-price-alert"
-version = "0.1.0"
+version = "0.2.0"
 description = "金价实时监控与智能分析系统"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,12 +20,20 @@ dependencies = [
     "openai>=1.10",
     "fastapi>=0.109",
     "uvicorn>=0.27",
+    "websockets>=12.0",  # WebSocket 支持
+    # P0: 安全依赖
+    "cryptography>=41.0.0",  # 密钥加密（可选，轻量级方案不需要）
+    # P1: 可观测性
+    "prometheus-client>=0.19.0",  # 指标暴露
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
+    "pytest-cov>=4.1.0",  # 测试覆盖
+    "ruff>=0.1.0",  # 代码检查
+    "mypy>=1.8.0",  # 类型检查
 ]
 
 [project.scripts]

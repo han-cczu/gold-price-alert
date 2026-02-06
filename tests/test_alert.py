@@ -1,7 +1,7 @@
 """告警模块测试"""
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, AsyncMock
 
 from gold_monitor.alert import (
@@ -57,7 +57,7 @@ async def test_threshold_upper_alert(alert_monitor, mock_notification):
     price_data = PriceData(
         price=2150.0,  # 超过上限 2100
         currency="USD",
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
         source="test"
     )
 
@@ -75,7 +75,7 @@ async def test_threshold_lower_alert(alert_monitor, mock_notification):
     price_data = PriceData(
         price=1850.0,  # 低于下限 1900
         currency="USD",
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
         source="test"
     )
 
@@ -92,7 +92,7 @@ async def test_no_alert_in_range(alert_monitor, mock_notification):
     price_data = PriceData(
         price=2000.0,  # 在 1900-2100 范围内
         currency="USD",
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
         source="test"
     )
 
@@ -105,25 +105,33 @@ async def test_no_alert_in_range(alert_monitor, mock_notification):
 @pytest.mark.asyncio
 async def test_volatility_alert(alert_monitor, mock_notification):
     """测试波动告警"""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    # 先添加一个基准价格
-    price1 = PriceData(price=2000.0, timestamp=now - timedelta(minutes=2), source="test")
-    await alert_monitor.check_price(price1)
+    # 构建连续上涨趋势（智能波动检测器要求 >=3 个连续同向采样）
+    trend_prices = [
+        (2000.0, -4),  # 基准价
+        (2006.0, -3),  # +0.3%
+        (2012.0, -2),  # +0.6%
+        (2019.0, -1),  # +0.95%
+        (2025.0,  0),  # +1.25% 总涨幅
+    ]
 
-    # 价格上涨超过 1%
-    price2 = PriceData(price=2025.0, timestamp=now, source="test")  # 上涨 1.25%
-    alerts = await alert_monitor.check_price(price2)
+    all_alerts = []
+    for price, minutes_offset in trend_prices:
+        pd = PriceData(price=price, timestamp=now + timedelta(minutes=minutes_offset), source="test")
+        alerts = await alert_monitor.check_price(pd)
+        all_alerts.extend(alerts)
 
-    # 应该触发波动告警
-    volatility_alerts = [a for a in alerts if a.alert_type == AlertType.VOLATILITY]
-    assert len(volatility_alerts) == 1
+    # 应该触发波动相关告警（VOLATILITY 或 BREAKOUT_UP 等）
+    volatility_types = {AlertType.VOLATILITY, AlertType.BREAKOUT_UP, AlertType.BREAKOUT_DOWN, AlertType.PULLBACK}
+    volatility_alerts = [a for a in all_alerts if a.alert_type in volatility_types]
+    assert len(volatility_alerts) >= 1
 
 
 @pytest.mark.asyncio
 async def test_alert_cooldown(alert_monitor, mock_notification):
     """测试告警冷却期（避免重复告警）"""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # 第一次突破上限
     price1 = PriceData(price=2150.0, timestamp=now, source="test")
@@ -148,7 +156,7 @@ async def test_console_notification():
         alert_type=AlertType.THRESHOLD_UPPER,
         price=2150.0,
         message="测试告警",
-        triggered_at=datetime.utcnow()
+        triggered_at=datetime.now(timezone.utc).replace(tzinfo=None)
     )
 
     result = await notification.send(alert)

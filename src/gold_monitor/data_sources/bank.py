@@ -2,7 +2,7 @@
 
 import httpx
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Optional
 
@@ -59,31 +59,49 @@ class BankGoldDataSource(BaseDataSource):
         return PriceData(
             price=self._base_price_cny * 31.1035,  # 转换为 USD/oz
             currency="USD",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
             source=self.name
         )
 
     async def fetch_base_price_cny(self) -> float:
         """获取基础金价（CNY/克）
         
-        尝试从实时汇率和国际金价计算
+        从新浪财经获取实时国际金价，结合实时汇率计算
         """
         try:
             client = self._get_client()
-            # 获取实时汇率
+            
+            # 1. 从新浪财经获取实时国际金价 (USD/oz)
+            sina_headers = {
+                "Referer": "https://finance.sina.com.cn",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+            sina_resp = await client.get(
+                "https://hq.sinajs.cn/list=hf_GC",
+                headers=sina_headers,
+                timeout=5.0
+            )
+            international_price = 2050.0  # 默认值
+            if sina_resp.status_code == 200:
+                match = re.search(r'hq_str_hf_GC="([^"]+)"', sina_resp.text)
+                if match:
+                    data = match.group(1).split(",")
+                    international_price = float(data[0]) if data[0] else float(data[1])
+            
+            # 2. 获取实时汇率
             rate_resp = await client.get(
                 "https://api.exchangerate-api.com/v4/latest/USD",
                 timeout=5.0
             )
+            usd_cny = 7.2  # 默认汇率
             if rate_resp.status_code == 200:
                 rate_data = rate_resp.json()
                 usd_cny = rate_data.get("rates", {}).get("CNY", 7.2)
-                
-                # 假设国际金价约 2050 USD/oz
-                # 1 盎司 = 31.1035 克
-                # 计算人民币克价
-                international_price = 2050  # USD/oz
-                self._base_price_cny = (international_price * usd_cny) / 31.1035
+            
+            # 3. 计算人民币克价
+            # 1 盎司 = 31.1035 克
+            self._base_price_cny = (international_price * usd_cny) / 31.1035
+            
         except Exception:
             pass
         
@@ -92,7 +110,7 @@ class BankGoldDataSource(BaseDataSource):
     async def fetch_all_bank_prices(self) -> list[BankGoldPrice]:
         """获取所有银行金价"""
         base_price = await self.fetch_base_price_cny()
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         
         prices = []
         for bank in self.BANKS:

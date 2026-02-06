@@ -2,39 +2,48 @@
 
 实时监控黄金价格，自动告警通知，AI 智能分析市场动态。
 
+**纯 Web 模式** - 一个服务包含所有功能：Web 界面 + 数据采集 + 告警检测 + AI 分析。
+
 ## 功能特性
 
-- 🔄 **实时数据采集** - 支持多数据源（GoldAPI.io / 新浪财经 / Mock）
-- ⚠️ **智能告警** - 阈值告警、波动告警，支持多渠道通知
+- 🔄 **自动数据采集** - 后台自动采集金价，支持多数据源
+- ⚠️ **智能告警** - 阈值告警、波动告警，自动检测
 - 🤖 **AI 分析** - 调用大模型分析价格波动原因
-- 📊 **可视化展示** - 精美的 Web 界面，支持 K 线图和走势图
-- 💻 **CLI 工具** - 命令行实时监控
+- 📊 **可视化展示** - 走势图、银行金价对比、汇率换算
+- 🐳 **Docker 部署** - 一键启动，开箱即用
 
 ## 快速开始
 
-### 1. 安装
+### 方式一：本地运行
 
 ```bash
-# 克隆项目
-git clone <repo-url>
-cd gold-price-alert
-
-# 安装依赖
+# 1. 安装
 pip install -e .
+
+# 2. 启动服务
+gold-monitor
+
+# 3. 访问 http://localhost:8000
 ```
 
-### 2. 配置
-
-复制环境变量示例文件并编辑：
+### 方式二：Docker 运行
 
 ```bash
-cp .env.example .env
+# 1. 启动
+docker-compose up -d
+
+# 2. 查看日志
+docker-compose logs -f
+
+# 3. 访问 http://localhost:8000
 ```
 
-主要配置项：
+## 配置
+
+复制 `.env.example` 为 `.env` 并编辑：
 
 ```bash
-# 数据源: mock(模拟), sina(新浪财经), goldapi(GoldAPI.io)
+# 数据源: mock(模拟), sina(新浪), goldapi(GoldAPI.io)
 GOLD_DATA_SOURCE=mock
 
 # 采集间隔（秒）
@@ -45,115 +54,66 @@ GOLD_ALERT_THRESHOLD_PERCENT=1.0
 GOLD_ALERT_PRICE_UPPER=2500.0
 GOLD_ALERT_PRICE_LOWER=1800.0
 
-# 大模型配置（可选）
+# 大模型: mock, anthropic, openai
 GOLD_LLM_PROVIDER=mock
 GOLD_ANTHROPIC_API_KEY=your-key
 GOLD_OPENAI_API_KEY=your-key
 ```
 
-### 3. 运行
-
-#### CLI 实时监控
+## 命令行参数
 
 ```bash
-gold-monitor monitor
-```
+gold-monitor [选项]
 
-#### Web 服务
-
-```bash
-gold-monitor web --port 8000
-```
-
-访问 http://localhost:8000 查看 Web 界面。
-
-## CLI 命令
-
-```bash
-# 启动实时监控
-gold-monitor monitor
-
-# 获取当前金价
-gold-monitor fetch
-
-# 查看历史数据
-gold-monitor history --hours 24
-
-# 查看告警记录
-gold-monitor alerts --limit 20
-
-# 运行 AI 分析
-gold-monitor analyze
-
-# 启动 Web 服务
-gold-monitor web --host 0.0.0.0 --port 8000
+选项:
+  --host TEXT     监听地址 (默认: 0.0.0.0)
+  --port INTEGER  监听端口 (默认: 8000)
+  --reload        开发模式，自动重载
+  --version       显示版本号
 ```
 
 ## API 接口
 
-| 接口 | 方法 | 描述 |
-|------|------|------|
-| `/health` | GET | 健康检查 |
-| `/api/price/current` | GET | 获取当前金价 |
-| `/api/price/latest` | GET | 获取最新存储的金价 |
-| `/api/price/history` | GET | 获取历史价格 |
-| `/api/chart/data` | GET | 获取图表数据 |
-| `/api/alerts` | GET | 获取告警历史 |
-| `/api/analysis` | GET | 运行 AI 分析 |
-| `/api/config` | GET | 获取配置信息 |
+| 接口 | 说明 |
+|------|------|
+| `/` | Web 界面 |
+| `/health` | 健康检查（含采集状态） |
+| `/api/price/current` | 获取当前金价 |
+| `/api/price/history` | 历史价格 |
+| `/api/chart/data` | 图表数据 |
+| `/api/alerts` | 告警历史 |
+| `/api/analysis` | AI 分析 |
+| `/api/bank-prices` | 银行金价 |
+| `/api/exchange-rate` | 汇率 |
+| `/api/convert` | 价格换算 |
+| `/docs` | API 文档 |
 
 ## 项目结构
 
 ```
 gold-price-alert/
 ├── src/gold_monitor/
-│   ├── __init__.py      # 包入口
+│   ├── web.py           # Web 服务（含数据采集）
+│   ├── cli.py           # 命令行入口
 │   ├── config.py        # 配置管理
 │   ├── models.py        # 数据库模型
-│   ├── collector.py     # 数据采集服务
 │   ├── alert.py         # 告警模块
-│   ├── analyzer.py      # AI 分析模块
-│   ├── cli.py           # CLI 命令行
-│   ├── web.py           # Web 服务
-│   └── data_sources/    # 数据源适配器
-│       ├── base.py      # 基类
-│       ├── mock.py      # 模拟数据源
-│       ├── sina.py      # 新浪财经
-│       ├── goldapi.py   # GoldAPI.io
-│       └── fallback.py  # 故障自动切换
-├── tests/               # 测试用例
+│   ├── analyzer.py      # AI 分析
+│   └── data_sources/    # 数据源
+├── tests/               # 测试
 ├── docs/                # 文档
-├── pyproject.toml       # 项目配置
-├── .env.example         # 环境变量示例
-└── README.md            # 说明文档
+├── Dockerfile
+├── docker-compose.yml
+└── pyproject.toml
 ```
 
 ## 技术栈
 
-- **后端**: Python 3.10+, FastAPI, SQLAlchemy, APScheduler
+- **后端**: Python 3.10+, FastAPI, SQLAlchemy
 - **前端**: ECharts, 原生 JavaScript
-- **数据库**: SQLite (开发) / PostgreSQL (生产)
-- **大模型**: Anthropic Claude / OpenAI GPT
-
-## 告警通知渠道
-
-支持多种通知方式：
-
-1. **控制台** - 默认开启，终端实时显示
-2. **邮件** - 配置 SMTP 服务器
-3. **Webhook** - 支持钉钉、企业微信
-4. **Telegram** - 配置 Bot Token 和 Chat ID
-
-## 开发
-
-```bash
-# 安装开发依赖
-pip install -e ".[dev]"
-
-# 运行测试
-pytest tests/
-```
+- **数据库**: SQLite
+- **大模型**: Claude / OpenAI / Mock
 
 ## License
 
-MIT License
+MIT
