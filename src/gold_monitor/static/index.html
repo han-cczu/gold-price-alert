@@ -1,0 +1,2246 @@
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>金价实时监控系统</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                background: #f5f5f5;
+                color: #333;
+                min-height: 100vh;
+            }
+            .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+
+            /* 标题区域 */
+            .header {
+                text-align: center;
+                padding: 30px 0;
+            }
+            .header h1 {
+                font-size: 32px;
+                color: #1a1a2e;
+                margin-bottom: 10px;
+            }
+            .header .subtitle {
+                color: #666;
+                font-size: 14px;
+            }
+            .header .settings-btn {
+                position: absolute;
+                top: 30px;
+                right: 20px;
+                background: #fff;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                padding: 8px 16px;
+                cursor: pointer;
+                font-size: 14px;
+                color: #666;
+                transition: all 0.2s;
+            }
+            .header .settings-btn:hover {
+                background: #f5a623;
+                color: #fff;
+                border-color: #f5a623;
+            }
+            .header {
+                position: relative;
+            }
+
+            /* 日期时间显示 */
+            .datetime-bar {
+                background: #fff;
+                border-radius: 8px;
+                padding: 15px 30px;
+                text-align: center;
+                margin-bottom: 20px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            }
+            .datetime-bar .date { color: #333; font-size: 16px; }
+            .datetime-bar .time { color: #f5a623; font-size: 16px; margin-left: 20px; }
+
+            /* 分析切换按钮 */
+            .analysis-tabs {
+                display: flex;
+                justify-content: center;
+                gap: 10px;
+                margin-bottom: 20px;
+            }
+            .tab-btn {
+                padding: 10px 25px;
+                border: none;
+                border-radius: 20px;
+                cursor: pointer;
+                font-size: 14px;
+                transition: all 0.3s;
+            }
+            .tab-btn.active {
+                background: #f5a623;
+                color: #fff;
+            }
+            .tab-btn:not(.active) {
+                background: #fff;
+                color: #666;
+            }
+            .tab-btn:hover:not(.active) {
+                background: #f0f0f0;
+            }
+
+            /* AI 分析卡片 */
+            .analysis-card {
+                background: #fff;
+                border-radius: 8px;
+                padding: 25px 30px;
+                margin-bottom: 20px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            }
+            .analysis-row {
+                display: flex;
+                margin-bottom: 15px;
+            }
+            .analysis-label {
+                width: 100px;
+                color: #333;
+                font-weight: 500;
+            }
+            .analysis-value {
+                flex: 1;
+                color: #666;
+            }
+            .analysis-btn {
+                display: block;
+                width: 150px;
+                margin: 20px auto 0;
+                padding: 12px 30px;
+                background: #f5a623;
+                color: #fff;
+                border: none;
+                border-radius: 25px;
+                cursor: pointer;
+                font-size: 14px;
+                transition: background 0.3s;
+            }
+            .analysis-btn:hover {
+                background: #e09000;
+            }
+
+            /* 价格显示区域 */
+            .price-section {
+                background: #fff;
+                border-radius: 8px;
+                padding: 30px;
+                margin-bottom: 20px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            }
+            .price-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                margin-bottom: 20px;
+                flex-wrap: wrap;
+                gap: 20px;
+            }
+            .price-main {
+                display: flex;
+                align-items: baseline;
+                gap: 15px;
+            }
+            .price-value {
+                font-size: 42px;
+                font-weight: bold;
+                color: #1a1a2e;
+            }
+            .price-change {
+                font-size: 18px;
+                font-weight: 500;
+            }
+            .price-change.up { color: #00c853; }
+            .price-change.down { color: #ff5252; }
+
+            /* 切换按钮组 */
+            .switch-group {
+                display: flex;
+                gap: 5px;
+                background: #f5f5f5;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            .switch-btn {
+                padding: 8px 16px;
+                border: none;
+                background: transparent;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 13px;
+                color: #666;
+                transition: all 0.2s;
+            }
+            .switch-btn.active {
+                background: #fff;
+                color: #333;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            }
+            .switch-btn:hover:not(.active) {
+                color: #333;
+            }
+
+            /* 图表控制栏 */
+            .chart-controls {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 15px;
+                flex-wrap: wrap;
+                gap: 15px;
+            }
+
+            /* 时间周期选择 */
+            .period-group {
+                display: flex;
+                gap: 5px;
+            }
+            .period-btn {
+                padding: 6px 14px;
+                border: 1px solid #ddd;
+                background: #fff;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 13px;
+                color: #666;
+                transition: all 0.2s;
+            }
+            .period-btn.active {
+                background: #1a1a2e;
+                color: #fff;
+                border-color: #1a1a2e;
+            }
+            .period-btn:hover:not(.active) {
+                border-color: #999;
+            }
+
+            /* 图表容器 */
+            #chart {
+                width: 100%;
+                height: 400px;
+            }
+
+            /* 统计信息 */
+            .stats-row {
+                display: flex;
+                justify-content: space-around;
+                padding-top: 20px;
+                border-top: 1px solid #eee;
+                margin-top: 20px;
+            }
+            .stat-item {
+                text-align: center;
+            }
+            .stat-label {
+                font-size: 12px;
+                color: #999;
+                margin-bottom: 5px;
+            }
+            .stat-value {
+                font-size: 18px;
+                font-weight: 500;
+                color: #333;
+            }
+            .stat-value.high { color: #00c853; }
+            .stat-value.low { color: #ff5252; }
+
+            /* 历史记录表格 */
+            .history-section {
+                background: #fff;
+                border-radius: 8px;
+                padding: 25px 30px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            }
+            .history-section h2 {
+                font-size: 18px;
+                margin-bottom: 20px;
+                color: #333;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            th, td {
+                padding: 12px 15px;
+                text-align: left;
+                border-bottom: 1px solid #eee;
+            }
+            th {
+                color: #999;
+                font-weight: 500;
+                font-size: 13px;
+            }
+            td {
+                color: #333;
+                font-size: 14px;
+            }
+
+            /* Markdown 渲染样式 */
+            .markdown-content {
+                line-height: 1.8;
+                color: #333;
+            }
+            .markdown-content h1, .markdown-content h2, .markdown-content h3, 
+            .markdown-content h4, .markdown-content h5, .markdown-content h6 {
+                margin: 16px 0 8px 0;
+                font-weight: 600;
+                color: #1a1a2e;
+            }
+            .markdown-content h3 { font-size: 16px; }
+            .markdown-content h4 { font-size: 14px; }
+            .markdown-content p {
+                margin: 8px 0;
+                line-height: 1.8;
+            }
+            .markdown-content ul, .markdown-content ol {
+                margin: 8px 0 8px 20px;
+                padding-left: 10px;
+            }
+            .markdown-content li {
+                margin: 6px 0;
+                line-height: 1.6;
+            }
+            .markdown-content strong {
+                font-weight: 600;
+                color: #1a1a2e;
+            }
+            .markdown-content em {
+                font-style: italic;
+                color: #666;
+            }
+            .markdown-content code {
+                background: #f5f5f5;
+                padding: 2px 6px;
+                border-radius: 4px;
+                font-family: monospace;
+                font-size: 13px;
+            }
+            .markdown-content blockquote {
+                border-left: 3px solid #f5a623;
+                margin: 12px 0;
+                padding: 8px 16px;
+                background: #fffaf0;
+                color: #666;
+            }
+            .markdown-content table {
+                border-collapse: collapse;
+                margin: 12px 0;
+                width: 100%;
+            }
+            .markdown-content th, .markdown-content td {
+                border: 1px solid #ddd;
+                padding: 8px 12px;
+                text-align: left;
+            }
+            .markdown-content th {
+                background: #f5f5f5;
+            }
+            /* AI分析卡片内的Markdown样式 */
+            .analysis-card .markdown-content {
+                color: rgba(255,255,255,0.95);
+            }
+            .analysis-card .markdown-content h3, 
+            .analysis-card .markdown-content h4,
+            .analysis-card .markdown-content strong {
+                color: #fff;
+            }
+            .analysis-card .markdown-content code {
+                background: rgba(255,255,255,0.2);
+                color: #fff;
+            }
+            .analysis-card .markdown-content blockquote {
+                border-left-color: rgba(255,255,255,0.5);
+                background: rgba(255,255,255,0.1);
+                color: rgba(255,255,255,0.9);
+            }
+            /* 原始响应展示区 */
+            .raw-response-section {
+                margin-top: 20px;
+                border-top: 1px solid #eee;
+                padding-top: 15px;
+            }
+            .raw-response-toggle {
+                background: #f5f5f5;
+                border: 1px solid #ddd;
+                border-radius: 6px;
+                padding: 8px 16px;
+                cursor: pointer;
+                font-size: 13px;
+                color: #666;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .raw-response-toggle:hover {
+                background: #eee;
+            }
+            .raw-response-content {
+                margin-top: 12px;
+                background: #1a1a2e;
+                color: #e0e0e0;
+                padding: 16px;
+                border-radius: 8px;
+                font-family: 'Consolas', 'Monaco', monospace;
+                font-size: 13px;
+                line-height: 1.6;
+                white-space: pre-wrap;
+                word-break: break-word;
+                max-height: 400px;
+                overflow-y: auto;
+            }
+
+            /* 加载动画 */
+            .loading {
+                color: #999;
+                font-style: italic;
+            }
+
+            /* 银行金价对比 */
+            .bank-section {
+                background: #fff;
+                border-radius: 8px;
+                padding: 25px 30px;
+                margin-bottom: 20px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            }
+            .bank-section h2 {
+                font-size: 18px;
+                margin-bottom: 20px;
+                color: #333;
+            }
+            .section-subtitle {
+                font-size: 13px;
+                color: #999;
+                font-weight: normal;
+            }
+            .bank-cards {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+                gap: 15px;
+            }
+            .bank-card {
+                background: #fff;
+                border-radius: 12px;
+                padding: 20px;
+                color: #333;
+                transition: all 0.2s;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+                border: 1px solid #eee;
+            }
+            .bank-card:hover {
+                transform: translateY(-3px);
+                box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+            }
+            .bank-card .bank-name {
+                font-size: 15px;
+                font-weight: 600;
+                margin-bottom: 15px;
+                padding-bottom: 10px;
+                border-bottom: 2px solid;
+            }
+            .bank-card .price-row {
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 8px;
+            }
+            .bank-card .price-label {
+                font-size: 13px;
+                color: #888;
+            }
+            .bank-card .price-value {
+                font-size: 18px;
+                font-weight: bold;
+                color: #333;
+            }
+            .bank-card .spread {
+                font-size: 12px;
+                color: #999;
+                text-align: right;
+                margin-top: 10px;
+            }
+            .london-gold-info {
+                margin-top: 15px;
+                padding-top: 15px;
+                border-top: 1px solid #eee;
+                color: #666;
+                font-size: 14px;
+            }
+            #london-gold-price {
+                color: #f5a623;
+                font-weight: bold;
+            }
+
+            /* 汇率换算工具 */
+            .converter-section {
+                background: #fff;
+                border-radius: 8px;
+                padding: 25px 30px;
+                margin-bottom: 20px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            }
+            .converter-section h2 {
+                font-size: 18px;
+                margin-bottom: 20px;
+                color: #333;
+            }
+            .converter-row {
+                display: flex;
+                align-items: center;
+                gap: 20px;
+                flex-wrap: wrap;
+            }
+            .converter-input-group {
+                display: flex;
+                gap: 8px;
+                flex: 1;
+                min-width: 280px;
+            }
+            .converter-input-group input {
+                flex: 1;
+                padding: 12px 15px;
+                border: 1px solid #ddd;
+                border-radius: 6px;
+                font-size: 16px;
+            }
+            .converter-input-group select {
+                padding: 12px 10px;
+                border: 1px solid #ddd;
+                border-radius: 6px;
+                background: #fff;
+                font-size: 14px;
+                cursor: pointer;
+            }
+            .converter-arrow {
+                font-size: 24px;
+                color: #999;
+            }
+            .converter-info {
+                margin-top: 15px;
+                color: #999;
+                font-size: 13px;
+            }
+            #current-rate {
+                color: #f5a623;
+                font-weight: bold;
+            }
+
+            /* 告警历史 */
+            .alerts-section {
+                background: #fff;
+                border-radius: 8px;
+                padding: 25px 30px;
+                margin-bottom: 20px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            }
+            .alerts-section h2 {
+                font-size: 18px;
+                margin-bottom: 20px;
+                color: #333;
+            }
+            .alert-item {
+                display: flex;
+                align-items: center;
+                padding: 12px 15px;
+                border-radius: 8px;
+                margin-bottom: 10px;
+                background: #f8f9fa;
+            }
+            .alert-item.threshold_upper { border-left: 4px solid #ff5252; }
+            .alert-item.threshold_lower { border-left: 4px solid #ffc107; }
+            .alert-item.volatility { border-left: 4px solid #2196f3; }
+            .alert-icon {
+                font-size: 20px;
+                margin-right: 15px;
+            }
+            .alert-content {
+                flex: 1;
+            }
+            .alert-message {
+                font-size: 14px;
+                color: #333;
+            }
+            .alert-time {
+                font-size: 12px;
+                color: #999;
+                margin-top: 4px;
+            }
+            .alert-price {
+                font-size: 16px;
+                font-weight: bold;
+                color: #333;
+            }
+            .no-alerts {
+                color: #999;
+                text-align: center;
+                padding: 20px;
+            }
+
+            /* 响应式 */
+            @media (max-width: 768px) {
+                .price-value { font-size: 32px; }
+                .chart-controls { flex-direction: column; align-items: stretch; }
+                .period-group { justify-content: center; flex-wrap: wrap; }
+                #chart { height: 300px; }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>黄金价格走势图</h1>
+                <p class="subtitle">实时监控金价走势，AI 智能分析市场动态</p>
+                <button class="settings-btn" onclick="openSettings()" title="设置">⚙️ 设置</button>
+            </div>
+
+            <div class="datetime-bar">
+                <span class="date" id="current-date">加载中...</span>
+                <span class="time" id="current-time">--:--:--</span>
+            </div>
+
+            <!-- 智能分析卡片 -->
+            <div class="analysis-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; padding: 25px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+                    <h3 style="margin:0; font-size:18px;">📊 AI 智能分析</h3>
+                    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                        <select id="analysis-model-select" onchange="onAnalysisModelChange()"
+                                style="padding:6px 12px; border-radius:15px; border:none; background:#fff; color:#333; font-size:12px; cursor:pointer; min-width:150px;">
+                            <option value="">选择模型...</option>
+                        </select>
+                        <button onclick="fetchAnalysisModels()" id="fetch-analysis-models-btn"
+                                style="padding:6px 12px; background:rgba(255,255,255,0.15); color:#fff; border:none; border-radius:15px; cursor:pointer; font-size:12px;">
+                            获取模型
+                        </button>
+                        <span id="analysis-cache-info" style="font-size:12px; opacity:0.8;"></span>
+                        <button onclick="refreshSmartAnalysis()" id="refresh-analysis-btn"
+                                style="padding:8px 16px; background:rgba(255,255,255,0.2); color:#fff; border:none; border-radius:20px; cursor:pointer; font-size:13px; transition:all 0.2s;">
+                            🔄 刷新分析
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="ai-status-bar" style="display:flex; align-items:center; gap:8px; padding:8px 12px; border-radius:6px; margin-bottom:15px; font-size:13px; background:rgba(255,255,255,0.15);">
+                    <span id="ai-status-icon">●</span>
+                    <span id="ai-status-text">检查中...</span>
+                </div>
+                
+                <div id="smart-analysis-content">
+                    <div style="text-align:center; padding:30px; opacity:0.8;">
+                        <div style="font-size:24px; margin-bottom:10px;">⏳</div>
+                        <div>正在获取 AI 分析...</div>
+                    </div>
+                </div>
+                
+                <div style="margin-top:15px; text-align:center;">
+                    <button onclick="showFullAnalysis()" id="show-full-btn" style="display:none; padding:10px 25px; background:rgba(255,255,255,0.2); color:#fff; border:none; border-radius:20px; cursor:pointer; font-size:14px;">
+                        查看完整报告
+                    </button>
+                </div>
+            </div>
+
+            <div class="price-section">
+                <div class="price-header">
+                    <div class="price-main">
+                        <span class="price-value" id="current-price">$0.00</span>
+                        <span class="price-change" id="price-change">+0.00%</span>
+                    </div>
+                    <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                        <div class="switch-group" id="currency-switch">
+                            <button class="switch-btn" data-currency="USD">USD</button>
+                            <button class="switch-btn active" data-currency="CNY">CNY</button>
+                        </div>
+                        <div class="switch-group" id="unit-switch">
+                            <button class="switch-btn" data-unit="KG">KG</button>
+                            <button class="switch-btn active" data-unit="G">G</button>
+                            <button class="switch-btn" data-unit="OZ">OZ</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-controls">
+                    <div></div>
+                    <div class="period-group">
+                        <button class="period-btn active" data-period="1D">1D</button>
+                        <button class="period-btn" data-period="7D">7D</button>
+                        <button class="period-btn" data-period="1M">1M</button>
+                        <button class="period-btn" data-period="6M">6M</button>
+                        <button class="period-btn" data-period="1Y">1Y</button>
+                        <button class="period-btn" data-period="5Y">5Y</button>
+                    </div>
+                </div>
+
+                <div id="chart"></div>
+
+                <div class="stats-row">
+                    <div class="stat-item">
+                        <div class="stat-label">最高价</div>
+                        <div class="stat-value high" id="stat-high">$0.00</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">最低价</div>
+                        <div class="stat-value low" id="stat-low">$0.00</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">平均价</div>
+                        <div class="stat-value" id="stat-avg">$0.00</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-label">数据点</div>
+                        <div class="stat-value" id="stat-count">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 银行金价对比 -->
+            <div class="bank-section">
+                <h2>银行金价对比 <span class="section-subtitle">(Au99.99 人民币/克)</span></h2>
+                <div class="bank-cards" id="bank-cards">
+                    <div class="loading">加载中...</div>
+                </div>
+                <div class="london-gold-info">
+                    <span>伦敦金基准价: </span>
+                    <span id="london-gold-price">¥0.00/克</span>
+                </div>
+            </div>
+
+            <!-- 汇率换算工具 -->
+            <div class="converter-section">
+                <h2>金价换算工具</h2>
+                <div class="converter-row">
+                    <div class="converter-input-group">
+                        <input type="number" id="convert-input" value="2050" step="0.01" placeholder="输入金额">
+                        <select id="convert-from-unit">
+                            <option value="oz">盎司 (oz)</option>
+                            <option value="g">克 (g)</option>
+                            <option value="kg">公斤 (kg)</option>
+                        </select>
+                        <select id="convert-from-currency">
+                            <option value="USD">美元 (USD)</option>
+                            <option value="CNY">人民币 (CNY)</option>
+                        </select>
+                    </div>
+                    <div class="converter-arrow">→</div>
+                    <div class="converter-input-group">
+                        <input type="text" id="convert-output" readonly placeholder="结果">
+                        <select id="convert-to-unit">
+                            <option value="oz">盎司 (oz)</option>
+                            <option value="g" selected>克 (g)</option>
+                            <option value="kg">公斤 (kg)</option>
+                        </select>
+                        <select id="convert-to-currency">
+                            <option value="USD">美元 (USD)</option>
+                            <option value="CNY" selected>人民币 (CNY)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="converter-info">
+                    当前汇率: 1 USD = <span id="current-rate">7.20</span> CNY
+                </div>
+            </div>
+
+            <!-- 告警历史 -->
+            <div class="alerts-section">
+                <h2>最近告警记录</h2>
+                <div id="alerts-container">
+                    <div class="loading">加载中...</div>
+                </div>
+            </div>
+
+            <div class="history-section">
+                <h2>最近价格记录</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>时间</th>
+                            <th>价格 (USD)</th>
+                            <th>来源</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-table">
+                        <tr><td colspan="3" class="loading">加载中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 详细分析弹窗 -->
+        <div id="analysis-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000;">
+            <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:#fff; border-radius:12px; padding:30px; max-width:600px; width:90%; max-height:80vh; overflow-y:auto;">
+                <h2 style="margin-bottom:20px; color:#333;">AI 分析报告</h2>
+                <div id="modal-content"></div>
+                <button onclick="closeModal()" style="margin-top:20px; padding:10px 30px; background:#f5a623; color:#fff; border:none; border-radius:20px; cursor:pointer;">关闭</button>
+            </div>
+        </div>
+
+        <!-- 设置弹窗 - 多平台管理 -->
+        <div id="settings-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1001;">
+            <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:#fff; border-radius:12px; padding:30px; max-width:700px; width:95%; max-height:85vh; overflow-y:auto;">
+                <h2 style="margin-bottom:10px; color:#333; display:flex; align-items:center; gap:10px;">
+                    ⚙️ AI 模型服务配置
+                </h2>
+                <p style="color:#666; font-size:13px; margin-bottom:20px;">
+                    管理多个模型服务平台，支持 OpenAI 兼容接口
+                </p>
+                
+                <!-- 平台列表 -->
+                <div style="margin-bottom:20px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                        <label style="font-weight:500; color:#333;">模型服务平台</label>
+                        <button type="button" onclick="showAddProviderForm()" 
+                                style="padding:6px 12px; background:#4CAF50; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px;">
+                            + 添加平台
+                        </button>
+                    </div>
+                    <div id="providers-list" style="border:1px solid #eee; border-radius:8px; overflow:hidden;">
+                        <!-- 平台列表由 JS 动态生成 -->
+                    </div>
+                </div>
+                
+                <!-- 当前选中平台的配置 -->
+                <div id="provider-config-section" style="display:none; background:#f9f9f9; border-radius:8px; padding:20px; margin-bottom:15px;">
+                    <h3 style="margin:0 0 15px 0; font-size:16px; color:#333;" id="config-title">配置平台</h3>
+                    
+                    <div style="margin-bottom:15px;">
+                        <label style="display:block; margin-bottom:6px; font-weight:500; color:#555; font-size:13px;">平台名称</label>
+                        <input type="text" id="provider-name" placeholder="如: DeepSeek"
+                               style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px; font-size:14px; box-sizing:border-box;">
+                    </div>
+                    
+                    <div style="margin-bottom:15px;">
+                        <label style="display:block; margin-bottom:6px; font-weight:500; color:#555; font-size:13px;">API 地址</label>
+                        <input type="text" id="provider-url" placeholder="如: https://api.deepseek.com"
+                               style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px; font-size:14px; box-sizing:border-box;">
+                        <p id="provider-url-preview" style="color:#2196f3; font-size:12px; margin-top:3px;"></p>
+                    </div>
+                    
+                    <div style="margin-bottom:15px;">
+                        <label style="display:block; margin-bottom:6px; font-weight:500; color:#555; font-size:13px;">API Key</label>
+                        <input type="password" id="provider-key" placeholder="输入 API Key（留空保持原有）"
+                               style="width:100%; padding:10px; border:1px solid #ddd; border-radius:6px; font-size:14px; box-sizing:border-box;">
+                    </div>
+                    
+                    <div style="margin-bottom:15px;">
+                        <label style="display:block; margin-bottom:6px; font-weight:500; color:#555; font-size:13px;">选择模型</label>
+                        <div style="display:flex; gap:8px;">
+                            <select id="provider-model" style="flex:1; padding:10px; border:1px solid #ddd; border-radius:6px; font-size:14px;">
+                                <option value="">-- 选择或手动输入 --</option>
+                            </select>
+                            <button type="button" onclick="fetchProviderModels()" id="fetch-models-btn"
+                                    style="padding:10px 14px; background:#2196f3; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px; white-space:nowrap;">
+                                获取模型
+                            </button>
+                        </div>
+                        <input type="text" id="provider-model-custom" placeholder="或手动输入: deepseek-chat"
+                               style="width:100%; padding:8px; border:1px solid #ddd; border-radius:6px; font-size:13px; box-sizing:border-box; margin-top:8px;">
+                    </div>
+                    
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <button type="button" onclick="saveProviderConfig()" 
+                                style="flex:1; padding:10px 16px; background:#f5a623; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:14px;">
+                            保存配置
+                        </button>
+                        <button type="button" onclick="testProviderConnection()"
+                                style="padding:10px 16px; background:#4CAF50; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:14px;">
+                            测试
+                        </button>
+                        <button type="button" onclick="useThisProvider()"
+                                style="padding:10px 16px; background:#9c27b0; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:14px;">
+                            使用此配置
+                        </button>
+                        <button type="button" onclick="deleteCurrentProvider()" id="delete-provider-btn"
+                                style="padding:10px 16px; background:#ff5252; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:14px;">
+                            删除
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="settings-status" style="padding:12px; border-radius:8px; margin-bottom:15px; display:none;"></div>
+                
+                <div style="display:flex; justify-content:flex-end; gap:10px; border-top:1px solid #eee; padding-top:15px;">
+                    <button type="button" onclick="resetLLMConfig()" style="padding:10px 20px; background:#ff5252; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:14px;">
+                        重置全部
+                    </button>
+                    <button onclick="closeSettings()" style="padding:10px 20px; background:#666; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:14px;">
+                        关闭
+                    </button>
+                </div>
+                
+                <button onclick="closeSettings()" style="position:absolute; top:15px; right:15px; background:none; border:none; font-size:24px; cursor:pointer; color:#999;">×</button>
+            </div>
+        </div>
+
+        <script>
+            // 全局状态
+            let chart = null;
+            let currentCurrency = 'CNY';
+            let currentUnit = 'G';
+            let currentPeriod = '1D';
+            let chartData = { timestamps: [], prices: [] };
+            let analysisData = null;
+
+            // 单位换算系数
+            const unitConversions = {
+                'OZ': 1,
+                'G': 31.1035,  // 1 盎司 = 31.1035 克
+                'KG': 31103.5  // 1 盎司 = 0.0311035 公斤
+            };
+
+            // 汇率（从 API 获取）
+            let exchangeRates = {
+                'USD': 1,
+                'CNY': 7.2
+            };
+
+            // 获取实时汇率
+            async function fetchExchangeRate() {
+                try {
+                    const resp = await fetch('/api/exchange-rate');
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        exchangeRates.CNY = data.usd_cny;
+                    }
+                } catch (e) {
+                    console.warn('获取汇率失败，使用默认值');
+                }
+            }
+
+            // 初始化图表
+            function initChart() {
+                chart = echarts.init(document.getElementById('chart'));
+                window.addEventListener('resize', () => chart.resize());
+            }
+
+            // 更新图表
+            function updateChart(data) {
+                const prices = data.prices.map(p => convertPrice(p));
+                const currencySymbol = currentCurrency === 'USD' ? '$' : '¥';
+                const unitLabel = currentUnit === 'OZ' ? '盎司' : (currentUnit === 'G' ? '克' : '公斤');
+
+                const option = {
+                    tooltip: {
+                        trigger: 'axis',
+                        formatter: function(params) {
+                            const time = params[0].axisValue;
+                            const price = params[0].data;
+                            return `${time}<br/>价格: ${currencySymbol}${price.toFixed(2)}/${unitLabel}`;
+                        },
+                        backgroundColor: 'rgba(255,255,255,0.95)',
+                        borderColor: '#eee',
+                        borderWidth: 1,
+                        textStyle: { color: '#333' }
+                    },
+                    grid: {
+                        left: '3%',
+                        right: '4%',
+                        bottom: '3%',
+                        top: '5%',
+                        containLabel: true
+                    },
+                    xAxis: {
+                        type: 'category',
+                        data: data.timestamps,
+                        boundaryGap: false,
+                        axisLine: { lineStyle: { color: '#ddd' } },
+                        axisLabel: { color: '#999', fontSize: 11 },
+                        axisTick: { show: false }
+                    },
+                    yAxis: {
+                        type: 'value',
+                        axisLine: { show: false },
+                        axisLabel: {
+                            color: '#999',
+                            fontSize: 11,
+                            formatter: val => currencySymbol + val.toFixed(2)
+                        },
+                        splitLine: { lineStyle: { color: '#f0f0f0', type: 'dashed' } }
+                    },
+                    series: [{
+                        name: '金价',
+                        type: 'line',
+                        data: prices,
+                        smooth: true,
+                        symbol: 'none',
+                        lineStyle: {
+                            color: '#4ecdc4',
+                            width: 2
+                        },
+                        areaStyle: {
+                            color: {
+                                type: 'linear',
+                                x: 0, y: 0, x2: 0, y2: 1,
+                                colorStops: [
+                                    { offset: 0, color: 'rgba(78, 205, 196, 0.4)' },
+                                    { offset: 1, color: 'rgba(78, 205, 196, 0.05)' }
+                                ]
+                            }
+                        },
+                        markLine: {
+                            silent: true,
+                            symbol: 'none',
+                            data: [{
+                                yAxis: prices[prices.length - 1],
+                                lineStyle: { color: '#4ecdc4', type: 'dashed', width: 1 },
+                                label: {
+                                    position: 'end',
+                                    formatter: currencySymbol + prices[prices.length - 1]?.toFixed(2),
+                                    color: '#4ecdc4',
+                                    backgroundColor: 'rgba(78, 205, 196, 0.1)',
+                                    padding: [4, 8],
+                                    borderRadius: 4
+                                }
+                            }]
+                        }
+                    }]
+                };
+
+                chart.setOption(option);
+            }
+
+            // 价格换算
+            function convertPrice(priceUSD) {
+                const rate = exchangeRates[currentCurrency];
+                const unitFactor = unitConversions[currentUnit];
+                return (priceUSD * rate) / unitFactor;
+            }
+
+            // 获取图表数据
+            async function fetchChartData() {
+                const periodHours = {
+                    '1D': 24,
+                    '7D': 168,
+                    '1M': 720,
+                    '6M': 4320,
+                    '1Y': 8760,
+                    '5Y': 43800
+                };
+
+                const hours = periodHours[currentPeriod] || 24;
+                const resp = await fetch(`/api/chart/data?hours=${hours}`);
+                const data = await resp.json();
+                chartData = data;
+
+                updateChart(data);
+                updateStats(data);
+                updatePriceDisplay(data);
+            }
+
+            // 更新价格显示
+            function updatePriceDisplay(data) {
+                const currencySymbol = currentCurrency === 'USD' ? '$' : '¥';
+                const price = convertPrice(data.current_price);
+                const changePercent = data.price_change_percent;
+
+                document.getElementById('current-price').textContent =
+                    currencySymbol + price.toFixed(2);
+
+                const changeEl = document.getElementById('price-change');
+                const sign = changePercent >= 0 ? '+' : '';
+                changeEl.textContent = sign + changePercent.toFixed(2) + '%';
+                changeEl.className = 'price-change ' + (changePercent >= 0 ? 'up' : 'down');
+            }
+
+            // 更新统计信息
+            function updateStats(data) {
+                const currencySymbol = currentCurrency === 'USD' ? '$' : '¥';
+                const high = convertPrice(data.high);
+                const low = convertPrice(data.low);
+                const prices = data.prices.map(p => convertPrice(p));
+                const avg = prices.reduce((a, b) => a + b, 0) / prices.length || 0;
+
+                document.getElementById('stat-high').textContent = currencySymbol + high.toFixed(2);
+                document.getElementById('stat-low').textContent = currencySymbol + low.toFixed(2);
+                document.getElementById('stat-avg').textContent = currencySymbol + avg.toFixed(2);
+                document.getElementById('stat-count').textContent = data.prices.length;
+            }
+
+            // 获取历史记录
+            async function fetchHistory() {
+                const resp = await fetch('/api/price/history?limit=10');
+                const data = await resp.json();
+
+                const tbody = document.getElementById('history-table');
+                if (data.data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="3">暂无数据</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.data.map(p => `
+                    <tr>
+                        <td>${new Date(p.timestamp).toLocaleString('zh-CN')}</td>
+                        <td>$${p.price.toFixed(2)}</td>
+                        <td>${p.source}</td>
+                    </tr>
+                `).join('');
+            }
+
+            // 智能分析数据
+            let smartAnalysisData = null;
+            let analysisModels = [];  // 当前平台的模型列表
+
+            // 获取当前平台的模型列表（用于分析）
+            async function fetchAnalysisModels() {
+                const btn = document.getElementById('fetch-analysis-models-btn');
+                btn.textContent = '获取中...';
+                btn.disabled = true;
+                
+                try {
+                    // 先获取当前激活的平台
+                    const configResp = await fetch('/api/llm/providers');
+                    if (!configResp.ok) return;
+                    
+                    const config = await configResp.json();
+                    const activeId = config.active_provider_id;
+                    
+                    if (!activeId || activeId === 'mock') {
+                        alert('当前使用 Mock 模式，请先配置 AI 平台');
+                        return;
+                    }
+                    
+                    // 获取模型列表
+                    const resp = await fetch(`/api/llm/providers/${activeId}/models`, { method: 'POST' });
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        analysisModels = data.models;
+                        
+                        // 填充下拉框
+                        const select = document.getElementById('analysis-model-select');
+                        select.innerHTML = '<option value="">选择模型...</option>';
+                        data.models.forEach(m => {
+                            const opt = document.createElement('option');
+                            opt.value = m.id;
+                            opt.textContent = m.id;
+                            select.appendChild(opt);
+                        });
+                        
+                        // 如果有活跃模型，选中它
+                        if (config.active_model) {
+                            select.value = config.active_model;
+                        }
+                    } else {
+                        const error = await resp.json();
+                        alert('获取模型失败: ' + (error.detail || '未知错误'));
+                    }
+                } catch (e) {
+                    console.error('获取模型失败', e);
+                } finally {
+                    btn.textContent = '获取模型';
+                    btn.disabled = false;
+                }
+            }
+
+            // 模型选择变化时
+            function onAnalysisModelChange() {
+                // 选择模型后可以直接刷新分析
+            }
+
+            // 获取 AI 状态
+            async function fetchAIStatus() {
+                try {
+                    const resp = await fetch('/api/llm/status');
+                    if (resp.ok) {
+                        const status = await resp.json();
+                        const statusBar = document.getElementById('ai-status-bar');
+                        const icon = document.getElementById('ai-status-icon');
+                        const text = document.getElementById('ai-status-text');
+                        
+                        if (status.enabled) {
+                            statusBar.style.background = 'rgba(76, 175, 80, 0.3)';
+                            icon.style.color = '#4CAF50';
+                            text.innerHTML = `AI 已启用: <strong>${status.provider_name}</strong> - ${status.model}`;
+                        } else {
+                            statusBar.style.background = 'rgba(255, 152, 0, 0.3)';
+                            icon.style.color = '#ff9800';
+                            text.innerHTML = `${status.message} <a href="#" onclick="openSettings(); return false;" style="color:#fff; text-decoration:underline;">去配置</a>`;
+                        }
+                    }
+                } catch (e) {
+                    console.warn('获取 AI 状态失败', e);
+                }
+            }
+
+            // 获取智能分析
+            async function fetchSmartAnalysis() {
+                try {
+                    await fetchAIStatus();
+                    
+                    const resp = await fetch('/api/smart-analysis');
+                    if (!resp.ok) {
+                        document.getElementById('smart-analysis-content').innerHTML = `
+                            <div style="text-align:center; padding:20px; opacity:0.8;">
+                                <div style="font-size:24px; margin-bottom:10px;">⚠️</div>
+                                <div>获取分析失败，请稍后重试</div>
+                            </div>
+                        `;
+                        return;
+                    }
+                    
+                    smartAnalysisData = await resp.json();
+                    renderSmartAnalysis(smartAnalysisData);
+                    
+                    // 更新缓存信息
+                    const cacheInfo = document.getElementById('analysis-cache-info');
+                    if (smartAnalysisData.is_cached && smartAnalysisData.cache_age_minutes > 0) {
+                        const hours = Math.floor(smartAnalysisData.cache_age_minutes / 60);
+                        const mins = smartAnalysisData.cache_age_minutes % 60;
+                        cacheInfo.textContent = hours > 0 ? `${hours}小时${mins}分钟前` : `${mins}分钟前`;
+                    } else {
+                        cacheInfo.textContent = '刚刚更新';
+                    }
+                    
+                    document.getElementById('show-full-btn').style.display = 'inline-block';
+                    
+                } catch (e) {
+                    console.error('获取智能分析失败', e);
+                }
+            }
+
+            // 渲染 Markdown 内容
+            function renderMarkdown(text) {
+                if (!text) return '';
+                try {
+                    return marked.parse(text);
+                } catch (e) {
+                    console.error('Markdown 解析失败:', e);
+                    return text.replace(/
+/g, '<br>');
+                }
+            }
+
+            // 渲染智能分析
+            function renderSmartAnalysis(data) {
+                const content = document.getElementById('smart-analysis-content');
+                const modelInfo = data.model_used ? `<span style="font-size:11px; opacity:0.6; margin-left:10px;">(${data.model_used})</span>` : '';
+                const searchBadge = data.web_search_used
+                    ? '<span style="font-size:11px; color:#2e7d32; margin-left:8px;">🌐 已联网检索</span>'
+                    : '<span style="font-size:11px; color:#999; margin-left:8px;">📚 基于模型知识（未联网）</span>';
+
+                content.innerHTML = `
+                    <div style="display:grid; gap:15px;">
+                        <div>
+                            <div style="font-size:12px; opacity:0.7; margin-bottom:5px;">📈 市场概况 ${modelInfo}${searchBadge}</div>
+                            <div class="markdown-content" style="font-size:14px;">${renderMarkdown(data.market_overview)}</div>
+                        </div>
+                        <div>
+                            <div style="font-size:12px; opacity:0.7; margin-bottom:5px;">⏰ 买入时机</div>
+                            <div class="markdown-content" style="font-size:14px;">${renderMarkdown(data.buy_timing)}</div>
+                        </div>
+                        <div>
+                            <div style="font-size:12px; opacity:0.7; margin-bottom:5px;">💡 操作建议</div>
+                            <div class="markdown-content" style="font-size:14px;">${renderMarkdown(data.recommendation)}</div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // 刷新智能分析
+            async function refreshSmartAnalysis() {
+                const btn = document.getElementById('refresh-analysis-btn');
+                const originalText = btn.innerHTML;
+                btn.innerHTML = '⏳ 分析中...';
+                btn.disabled = true;
+                
+                // 获取选择的模型
+                const selectedModel = document.getElementById('analysis-model-select').value;
+                
+                document.getElementById('smart-analysis-content').innerHTML = `
+                    <div style="text-align:center; padding:30px; opacity:0.8;">
+                        <div style="font-size:24px; margin-bottom:10px;">🤖</div>
+                        <div>AI 正在分析，请稍候...</div>
+                        <div style="font-size:12px; margin-top:10px; opacity:0.7;">
+                            ${selectedModel ? '使用模型: ' + selectedModel : '使用默认模型'} · 支持联网的模型会实时检索，可能需要 10-40 秒
+                        </div>
+                    </div>
+                `;
+                
+                try {
+                    const resp = await fetch('/api/smart-analysis/refresh', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ model: selectedModel || null })
+                    });
+                    if (resp.ok) {
+                        const result = await resp.json();
+                        smartAnalysisData = result.data;
+                        renderSmartAnalysis(smartAnalysisData);
+                        document.getElementById('analysis-cache-info').textContent = '刚刚更新';
+                        
+                        // 更新模型选择框
+                        if (smartAnalysisData.model_used) {
+                            const select = document.getElementById('analysis-model-select');
+                            // 检查是否存在该选项
+                            let found = false;
+                            for (let opt of select.options) {
+                                if (opt.value === smartAnalysisData.model_used) {
+                                    select.value = smartAnalysisData.model_used;
+                                    found = true;
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        const error = await resp.json();
+                        document.getElementById('smart-analysis-content').innerHTML = `
+                            <div style="text-align:center; padding:20px;">
+                                <div style="font-size:24px; margin-bottom:10px;">❌</div>
+                                <div>分析失败: ${error.detail || '未知错误'}</div>
+                            </div>
+                        `;
+                    }
+                } catch (e) {
+                    document.getElementById('smart-analysis-content').innerHTML = `
+                        <div style="text-align:center; padding:20px;">
+                            <div style="font-size:24px; margin-bottom:10px;">❌</div>
+                            <div>分析失败: ${e.message}</div>
+                        </div>
+                    `;
+                } finally {
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                }
+            }
+
+            // 显示完整分析报告
+            function showFullAnalysis() {
+                if (!smartAnalysisData) return;
+                
+                const modal = document.getElementById('analysis-modal');
+                const content = document.getElementById('modal-content');
+                
+                const factors = smartAnalysisData.key_factors.map(f => `<li style="margin-bottom:8px;">${renderMarkdown(f)}</li>`).join('');
+                
+                // 是否有原始响应
+                const hasRawResponse = smartAnalysisData.raw_response && smartAnalysisData.raw_response.length > 0;
+                const rawResponseSection = hasRawResponse ? `
+                    <div class="raw-response-section">
+                        <button class="raw-response-toggle" onclick="toggleRawResponse()">
+                            <span id="raw-toggle-icon">▶</span>
+                            <span>查看 AI 原始响应</span>
+                            <span style="font-size:11px; color:#999;">(${smartAnalysisData.raw_response.length} 字符)</span>
+                        </button>
+                        <div id="raw-response-content" class="raw-response-content" style="display:none;">${escapeHtml(smartAnalysisData.raw_response)}</div>
+                    </div>
+                ` : '';
+                
+                content.innerHTML = `
+                    <h3 style="color:#667eea; margin-bottom:15px;">${smartAnalysisData.title}</h3>
+                    
+                    <div style="margin-bottom:20px;">
+                        <h4 style="color:#333; margin-bottom:10px;">📊 市场概况</h4>
+                        <div class="markdown-content" style="color:#666;">${renderMarkdown(smartAnalysisData.market_overview)}</div>
+                    </div>
+                    
+                    <div style="margin-bottom:20px;">
+                        <h4 style="color:#333; margin-bottom:10px;">📈 近期走势</h4>
+                        <div class="markdown-content" style="color:#666;">${renderMarkdown(smartAnalysisData.recent_trend)}</div>
+                    </div>
+                    
+                    <div style="margin-bottom:20px;">
+                        <h4 style="color:#333; margin-bottom:10px;">🔍 影响因素</h4>
+                        <ul class="markdown-content" style="color:#666; margin-left:20px;">${factors}</ul>
+                    </div>
+                    
+                    <div style="margin-bottom:20px;">
+                        <h4 style="color:#333; margin-bottom:10px;">🔮 价格预测</h4>
+                        <div class="markdown-content" style="color:#666;">${renderMarkdown(smartAnalysisData.price_prediction)}</div>
+                    </div>
+                    
+                    <div style="margin-bottom:20px;">
+                        <h4 style="color:#333; margin-bottom:10px;">⏰ 买入时机</h4>
+                        <div class="markdown-content" style="color:#666;">${renderMarkdown(smartAnalysisData.buy_timing)}</div>
+                    </div>
+                    
+                    <div style="margin-bottom:20px;">
+                        <h4 style="color:#333; margin-bottom:10px;">💡 操作建议</h4>
+                        <div class="markdown-content" style="color:#666;">${renderMarkdown(smartAnalysisData.recommendation)}</div>
+                    </div>
+                    
+                    <div style="background:#fff3e0; padding:15px; border-radius:8px; margin-top:20px;">
+                        <h4 style="color:#e65100; margin-bottom:10px;">⚠️ 风险提示</h4>
+                        <div class="markdown-content" style="color:#e65100; font-size:13px;">${renderMarkdown(smartAnalysisData.risk_warning)}</div>
+                    </div>
+                    
+                    ${rawResponseSection}
+
+                    ${(() => {
+                        const srcs = smartAnalysisData.sources || [];
+                        if (!srcs.length) return '';
+                        const items = srcs.map(s => `<li style="margin-bottom:4px;">${escapeHtml(s.title || s.url)} <span style="color:#999;">${escapeHtml(s.url)}</span></li>`).join('');
+                        return `<div style="margin-top:18px; font-size:12px; color:#666;">
+                            <div style="font-weight:bold; margin-bottom:6px;">🔗 参考来源（联网检索）</div>
+                            <ul style="margin-left:18px;">${items}</ul>
+                        </div>`;
+                    })()}
+
+                    <p style="color:#999; font-size:12px; margin-top:20px; text-align:right;">
+                        ${smartAnalysisData.web_search_used ? '🌐 已联网检索实时数据' : '📚 基于模型已有知识（未联网，数据可能过时）'}<br>
+                        生成时间: ${new Date(smartAnalysisData.generated_at).toLocaleString('zh-CN')}
+                        ${smartAnalysisData.model_used ? ` · 模型: ${smartAnalysisData.model_used}` : ''}
+                    </p>
+                `;
+                
+                modal.style.display = 'block';
+            }
+            
+            // 切换原始响应显示
+            function toggleRawResponse() {
+                const content = document.getElementById('raw-response-content');
+                const icon = document.getElementById('raw-toggle-icon');
+                if (content.style.display === 'none') {
+                    content.style.display = 'block';
+                    icon.textContent = '▼';
+                } else {
+                    content.style.display = 'none';
+                    icon.textContent = '▶';
+                }
+            }
+            
+            // HTML 转义（防止 XSS）
+            function escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+
+            // 兼容旧的 fetchAnalysis（用于其他地方调用）
+            async function fetchAnalysis() {
+                await fetchSmartAnalysis();
+            }
+
+            // 切换分析模式
+            function switchAnalysis(mode) {
+                document.querySelectorAll('.analysis-tabs .tab-btn').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                event.target.classList.add('active');
+                // 可以根据 mode 加载不同的分析
+                fetchAnalysis();
+            }
+
+            // 显示详细分析
+            function showDetailedAnalysis() {
+                const modal = document.getElementById('analysis-modal');
+                const content = document.getElementById('modal-content');
+
+                if (analysisData) {
+                    content.innerHTML = `
+                        <p><strong>市场情绪：</strong> ${analysisData.market_sentiment}</p>
+                        <p style="margin-top:15px;"><strong>可能原因：</strong></p>
+                        <ul style="margin-left:20px; margin-top:10px;">
+                            ${analysisData.possible_reasons.map(r => `<li style="margin-bottom:8px;">${r}</li>`).join('')}
+                        </ul>
+                        <p style="margin-top:15px;"><strong>操作建议：</strong> ${analysisData.recommendation}</p>
+                        <p style="margin-top:15px; color:#999; font-size:12px;">
+                            生成时间: ${new Date(analysisData.generated_at).toLocaleString('zh-CN')}
+                        </p>
+                    `;
+                } else {
+                    content.innerHTML = '<p>暂无分析数据</p>';
+                }
+
+                modal.style.display = 'block';
+            }
+
+            // 关闭弹窗
+            function closeModal() {
+                document.getElementById('analysis-modal').style.display = 'none';
+            }
+
+            // 更新日期时间
+            function updateDateTime() {
+                const now = new Date();
+                const year = now.getFullYear();
+                const month = String(now.getMonth() + 1).padStart(2, '0');
+                const day = String(now.getDate()).padStart(2, '0');
+                document.getElementById('current-date').textContent = `${year}年${month}月${day}日`;
+                document.getElementById('current-time').textContent =
+                    now.toLocaleTimeString('zh-CN', { hour12: false });
+            }
+
+            // 绑定事件
+            function bindEvents() {
+                // 币种切换
+                document.querySelectorAll('#currency-switch .switch-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        document.querySelectorAll('#currency-switch .switch-btn').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        currentCurrency = btn.dataset.currency;
+                        if (chartData.prices.length > 0) {
+                            updateChart(chartData);
+                            updateStats(chartData);
+                            updatePriceDisplay(chartData);
+                        }
+                    });
+                });
+
+                // 单位切换
+                document.querySelectorAll('#unit-switch .switch-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        document.querySelectorAll('#unit-switch .switch-btn').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        currentUnit = btn.dataset.unit;
+                        if (chartData.prices.length > 0) {
+                            updateChart(chartData);
+                            updateStats(chartData);
+                            updatePriceDisplay(chartData);
+                        }
+                    });
+                });
+
+                // 时间周期切换
+                document.querySelectorAll('.period-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        currentPeriod = btn.dataset.period;
+                        fetchChartData();
+                    });
+                });
+
+                // 点击弹窗外部关闭
+                document.getElementById('analysis-modal').addEventListener('click', (e) => {
+                    if (e.target.id === 'analysis-modal') closeModal();
+                });
+
+                // 换算工具事件
+                const convertInputs = ['convert-input', 'convert-from-unit', 'convert-from-currency', 'convert-to-unit', 'convert-to-currency'];
+                convertInputs.forEach(id => {
+                    document.getElementById(id).addEventListener('change', doConvert);
+                    if (id === 'convert-input') {
+                        document.getElementById(id).addEventListener('input', doConvert);
+                    }
+                });
+            }
+
+            // 获取银行金价
+            async function fetchBankPrices() {
+                try {
+                    const resp = await fetch('/api/bank-prices');
+                    if (!resp.ok) return;
+                    const data = await resp.json();
+
+                    const container = document.getElementById('bank-cards');
+                    // 银行品牌色（用于装饰）
+                    const bankColors = {
+                        '工商银行': '#C80000',
+                        '中国银行': '#C2000B',
+                        '建设银行': '#0066B3',
+                        '农业银行': '#009966',
+                        '交通银行': '#003087',
+                        '招商银行': '#C41230',
+                        '兴业银行': '#0055A5',
+                        '民生银行': '#00A0E9',
+                        '浦发银行': '#003399',
+                        '光大银行': '#7B2D8E',
+                        '平安银行': '#FA6400',
+                        '中信银行': '#E60012'
+                    };
+                    const defaultColor = '#666';
+
+                    container.innerHTML = data.data.map((bank, i) => {
+                        const color = bankColors[bank.bank_name] || defaultColor;
+                        return `
+                        <div class="bank-card">
+                            <div class="bank-name" style="color: ${color}; border-color: ${color}">${bank.bank_name}</div>
+                            <div class="price-row">
+                                <span class="price-label">买入价</span>
+                                <span class="price-value">¥${bank.buy_price.toFixed(2)}</span>
+                            </div>
+                            <div class="price-row">
+                                <span class="price-label">卖出价</span>
+                                <span class="price-value">¥${bank.sell_price.toFixed(2)}</span>
+                            </div>
+                            <div class="spread">价差: ¥${(bank.sell_price - bank.buy_price).toFixed(2)}</div>
+                        </div>`;
+                    }).join('');
+
+                    document.getElementById('london-gold-price').textContent = `¥${data.london_gold_cny.toFixed(2)}/克`;
+                } catch (e) {
+                    console.warn('获取银行金价失败', e);
+                }
+            }
+
+            // 获取告警历史
+            async function fetchAlerts() {
+                try {
+                    const resp = await fetch('/api/alerts?limit=5');
+                    if (!resp.ok) return;
+                    const data = await resp.json();
+
+                    const container = document.getElementById('alerts-container');
+
+                    if (data.length === 0) {
+                        container.innerHTML = '<div class="no-alerts">暂无告警记录</div>';
+                        return;
+                    }
+
+                    const icons = {
+                        'threshold_upper': '🔴',
+                        'threshold_lower': '🟡',
+                        'volatility': '⚡'
+                    };
+
+                    // 将美元价格转换为人民币（每盎司 -> 每克）
+                    const rate = exchangeRates.CNY || 7.2;
+                    const ozToGram = 31.1035;
+
+                    container.innerHTML = data.map(alert => {
+                        const priceUSD = alert.price;  // USD/oz
+                        const priceCNY = (priceUSD * rate) / ozToGram;  // CNY/g
+                        return `
+                            <div class="alert-item ${alert.alert_type}">
+                                <span class="alert-icon">${icons[alert.alert_type] || '⚠️'}</span>
+                                <div class="alert-content">
+                                    <div class="alert-message">${alert.message}</div>
+                                    <div class="alert-time">${new Date(alert.triggered_at).toLocaleString('zh-CN')}</div>
+                                </div>
+                                <div class="alert-price">¥${priceCNY.toFixed(2)}/克</div>
+                            </div>
+                        `;
+                    }).join('');
+                } catch (e) {
+                    console.warn('获取告警历史失败', e);
+                }
+            }
+
+            // 执行换算
+            async function doConvert() {
+                const price = parseFloat(document.getElementById('convert-input').value) || 0;
+                const fromUnit = document.getElementById('convert-from-unit').value;
+                const toUnit = document.getElementById('convert-to-unit').value;
+                const fromCurrency = document.getElementById('convert-from-currency').value;
+                const toCurrency = document.getElementById('convert-to-currency').value;
+
+                try {
+                    const resp = await fetch(`/api/convert?price=${price}&from_unit=${fromUnit}&to_unit=${toUnit}&from_currency=${fromCurrency}&to_currency=${toCurrency}`);
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        const symbol = toCurrency === 'USD' ? '$' : '¥';
+                        document.getElementById('convert-output').value = `${symbol}${data.converted.price.toFixed(2)}`;
+                        document.getElementById('current-rate').textContent = data.exchange_rate.toFixed(4);
+                    }
+                } catch (e) {
+                    console.warn('换算失败', e);
+                }
+            }
+
+            // ============ WebSocket 实时推送 ============
+            let ws = null;
+            let wsReconnectTimer = null;
+            let wsConnected = false;
+
+            function connectWebSocket() {
+                if (ws && ws.readyState === WebSocket.OPEN) return;
+
+                const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${location.host}/ws`;
+
+                console.log('连接 WebSocket:', wsUrl);
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => {
+                    console.log('WebSocket 已连接');
+                    wsConnected = true;
+                    updateConnectionStatus(true);
+                    // 清除重连定时器
+                    if (wsReconnectTimer) {
+                        clearTimeout(wsReconnectTimer);
+                        wsReconnectTimer = null;
+                    }
+                    // 启动心跳
+                    startHeartbeat();
+                };
+
+                ws.onmessage = (event) => {
+                    try {
+                        const message = JSON.parse(event.data);
+                        handleWebSocketMessage(message);
+                    } catch (e) {
+                        console.warn('WebSocket 消息解析失败:', e);
+                    }
+                };
+
+                ws.onclose = () => {
+                    console.log('WebSocket 已断开');
+                    wsConnected = false;
+                    updateConnectionStatus(false);
+                    // 3秒后重连
+                    wsReconnectTimer = setTimeout(connectWebSocket, 3000);
+                };
+
+                ws.onerror = (error) => {
+                    console.error('WebSocket 错误:', error);
+                };
+            }
+
+            function handleWebSocketMessage(message) {
+                switch (message.type) {
+                    case 'price_update':
+                        onPriceUpdate(message.data);
+                        break;
+                    case 'alert':
+                        onAlertReceived(message.data);
+                        break;
+                    case 'pong':
+                        // 心跳响应
+                        break;
+                }
+            }
+
+            // 处理实时价格更新
+            function onPriceUpdate(data) {
+                console.log('收到价格更新:', data.price);
+
+                // 更新当前价格显示
+                const currencySymbol = currentCurrency === 'USD' ? '$' : '¥';
+                const price = convertPrice(data.price);
+                document.getElementById('current-price').textContent = currencySymbol + price.toFixed(2);
+
+                // 更新图表数据（追加新点）
+                if (chartData.timestamps && chartData.prices) {
+                    const timestamp = new Date(data.timestamp).toLocaleTimeString('zh-CN');
+                    chartData.timestamps.push(timestamp);
+                    chartData.prices.push(data.price);
+                    chartData.current_price = data.price;
+
+                    // 限制数据点数量
+                    if (chartData.timestamps.length > 500) {
+                        chartData.timestamps.shift();
+                        chartData.prices.shift();
+                    }
+
+                    updateChart(chartData);
+                }
+
+                // 闪烁效果
+                const priceEl = document.getElementById('current-price');
+                priceEl.style.transition = 'none';
+                priceEl.style.color = '#f5a623';
+                setTimeout(() => {
+                    priceEl.style.transition = 'color 0.5s';
+                    priceEl.style.color = '';
+                }, 100);
+            }
+
+            // 处理实时告警
+            function onAlertReceived(data) {
+                console.log('收到告警:', data.message);
+
+                // 显示通知
+                showNotification(data.message, data.alert_type);
+
+                // 刷新告警列表
+                fetchAlerts();
+            }
+
+            // 显示通知
+            function showNotification(message, type) {
+                // 创建通知元素
+                const notification = document.createElement('div');
+                notification.className = 'ws-notification ' + (type || 'info');
+                notification.innerHTML = `
+                    <span class="icon">⚠️</span>
+                    <span class="message">${message}</span>
+                    <button onclick="this.parentElement.remove()">×</button>
+                `;
+                notification.style.cssText = `
+                    position: fixed;
+                    top: 20px;
+                    right: 20px;
+                    background: linear-gradient(135deg, #ff6b6b, #ee5a5a);
+                    color: white;
+                    padding: 15px 20px;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+                    z-index: 10000;
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                    animation: slideIn 0.3s ease;
+                `;
+
+                document.body.appendChild(notification);
+
+                // 5秒后自动消失
+                setTimeout(() => notification.remove(), 5000);
+            }
+
+            // 更新连接状态
+            function updateConnectionStatus(connected) {
+                let statusEl = document.getElementById('ws-status');
+                if (!statusEl) {
+                    statusEl = document.createElement('div');
+                    statusEl.id = 'ws-status';
+                    statusEl.style.cssText = `
+                        position: fixed;
+                        bottom: 20px;
+                        right: 20px;
+                        padding: 8px 15px;
+                        border-radius: 20px;
+                        font-size: 12px;
+                        z-index: 9999;
+                        display: flex;
+                        align-items: center;
+                        gap: 6px;
+                    `;
+                    document.body.appendChild(statusEl);
+                }
+
+                if (connected) {
+                    statusEl.style.background = 'linear-gradient(135deg, #4CAF50, #45a049)';
+                    statusEl.style.color = 'white';
+                    statusEl.innerHTML = '<span style="font-size:8px">●</span> 实时连接';
+                } else {
+                    statusEl.style.background = 'linear-gradient(135deg, #ff9800, #f57c00)';
+                    statusEl.style.color = 'white';
+                    statusEl.innerHTML = '<span style="font-size:8px">●</span> 重连中...';
+                }
+            }
+
+            // 心跳检测
+            let heartbeatTimer = null;
+            function startHeartbeat() {
+                if (heartbeatTimer) clearInterval(heartbeatTimer);
+                heartbeatTimer = setInterval(() => {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'ping' }));
+                    }
+                }, 30000);
+            }
+
+            // ============ 设置相关函数（多平台支持） ============
+            
+            let llmProviders = [];  // 平台列表
+            let activeProviderId = '';  // 当前激活的平台
+            let activeModel = '';  // 当前激活的模型
+            let editingProviderId = null;  // 正在编辑的平台 ID
+            let isAddingNew = false;  // 是否正在添加新平台
+
+            // 打开设置弹窗
+            async function openSettings() {
+                document.getElementById('settings-modal').style.display = 'block';
+                await loadProviders();
+            }
+
+            // 关闭设置弹窗
+            function closeSettings() {
+                document.getElementById('settings-modal').style.display = 'none';
+                hideSettingsStatus();
+                editingProviderId = null;
+                isAddingNew = false;
+            }
+
+            // 加载平台列表
+            async function loadProviders() {
+                try {
+                    const resp = await fetch('/api/llm/providers');
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        llmProviders = data.providers;
+                        activeProviderId = data.active_provider_id;
+                        activeModel = data.active_model;
+                        renderProvidersList();
+                    }
+                } catch (e) {
+                    console.warn('加载平台列表失败', e);
+                }
+            }
+
+            // 渲染平台列表
+            function renderProvidersList() {
+                const container = document.getElementById('providers-list');
+                if (llmProviders.length === 0) {
+                    container.innerHTML = '<div style="padding:20px; text-align:center; color:#999;">暂无平台配置</div>';
+                    return;
+                }
+                
+                container.innerHTML = llmProviders.map(p => {
+                    const isActive = p.id === activeProviderId;
+                    const hasKey = p.has_api_key;
+                    return `
+                        <div class="provider-item" style="display:flex; align-items:center; padding:12px 15px; border-bottom:1px solid #eee; cursor:pointer; ${isActive ? 'background:#f0f7ff;' : ''}"
+                             onclick="selectProvider('${p.id}')">
+                            <div style="flex:1;">
+                                <div style="font-weight:500; color:#333; display:flex; align-items:center; gap:8px;">
+                                    ${p.name}
+                                    ${isActive ? '<span style="background:#4CAF50; color:#fff; font-size:10px; padding:2px 6px; border-radius:10px;">当前使用</span>' : ''}
+                                </div>
+                                <div style="font-size:12px; color:#999; margin-top:3px;">
+                                    ${p.base_url || '(无 URL)'}
+                                    ${hasKey ? ' • <span style="color:#4CAF50;">已配置 Key</span>' : ' • <span style="color:#ff9800;">未配置 Key</span>'}
+                                </div>
+                            </div>
+                            <div style="color:#ccc; font-size:20px;">›</div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            // 选择平台进行编辑
+            function selectProvider(providerId) {
+                isAddingNew = false;
+                editingProviderId = providerId;
+                const provider = llmProviders.find(p => p.id === providerId);
+                if (!provider) return;
+                
+                document.getElementById('provider-config-section').style.display = 'block';
+                document.getElementById('config-title').textContent = `配置: ${provider.name}`;
+                document.getElementById('provider-name').value = provider.name;
+                document.getElementById('provider-url').value = provider.base_url || '';
+                document.getElementById('provider-key').value = '';
+                document.getElementById('provider-key').placeholder = provider.has_api_key ? `已配置 (${provider.api_key})` : '输入 API Key';
+                
+                // 填充模型下拉框
+                const modelSelect = document.getElementById('provider-model');
+                modelSelect.innerHTML = '<option value="">-- 选择或手动输入 --</option>';
+                (provider.models || []).forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m;
+                    opt.textContent = m;
+                    modelSelect.appendChild(opt);
+                });
+                
+                // 如果是当前激活的平台，显示已选模型
+                if (providerId === activeProviderId && activeModel) {
+                    let found = false;
+                    for (let opt of modelSelect.options) {
+                        if (opt.value === activeModel) {
+                            modelSelect.value = activeModel;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        document.getElementById('provider-model-custom').value = activeModel;
+                    }
+                } else {
+                    document.getElementById('provider-model-custom').value = '';
+                }
+                
+                // Mock 不可删除
+                document.getElementById('delete-provider-btn').style.display = providerId === 'mock' ? 'none' : 'inline-block';
+                
+                updateProviderUrlPreview();
+            }
+
+            // 显示添加平台表单
+            function showAddProviderForm() {
+                isAddingNew = true;
+                editingProviderId = null;
+                
+                document.getElementById('provider-config-section').style.display = 'block';
+                document.getElementById('config-title').textContent = '添加新平台';
+                document.getElementById('provider-name').value = '';
+                document.getElementById('provider-url').value = '';
+                document.getElementById('provider-key').value = '';
+                document.getElementById('provider-key').placeholder = '输入 API Key';
+                document.getElementById('provider-model').innerHTML = '<option value="">-- 选择或手动输入 --</option>';
+                document.getElementById('provider-model-custom').value = '';
+                document.getElementById('delete-provider-btn').style.display = 'none';
+                document.getElementById('provider-url-preview').textContent = '';
+            }
+
+            // 更新 URL 预览
+            function updateProviderUrlPreview() {
+                const baseUrl = document.getElementById('provider-url').value.trim();
+                const preview = document.getElementById('provider-url-preview');
+                
+                if (!baseUrl) {
+                    preview.textContent = '';
+                    return;
+                }
+                
+                let url = baseUrl.replace(/[/]+$/, '');
+                if (!url.endsWith('/v1') && !url.includes('/v1/')) {
+                    url = url + '/v1';
+                }
+                preview.textContent = `预览: ${url}/chat/completions`;
+            }
+
+            // 显示设置状态
+            function showSettingsStatus(message, isSuccess) {
+                const status = document.getElementById('settings-status');
+                status.style.display = 'block';
+                status.style.background = isSuccess ? '#e8f5e9' : '#ffebee';
+                status.style.color = isSuccess ? '#2e7d32' : '#c62828';
+                status.innerHTML = message;
+            }
+
+            // 隐藏设置状态
+            function hideSettingsStatus() {
+                document.getElementById('settings-status').style.display = 'none';
+            }
+
+            // 保存平台配置
+            async function saveProviderConfig() {
+                const name = document.getElementById('provider-name').value.trim();
+                const url = document.getElementById('provider-url').value.trim();
+                const key = document.getElementById('provider-key').value;
+                
+                if (!name) {
+                    showSettingsStatus('❌ 请输入平台名称', false);
+                    return;
+                }
+                
+                try {
+                    let resp;
+                    if (isAddingNew) {
+                        // 添加新平台
+                        resp = await fetch('/api/llm/providers', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name, base_url: url, api_key: key || null })
+                        });
+                        
+                        if (resp.ok) {
+                            const data = await resp.json();
+                            showSettingsStatus('✅ 保存成功！', true);
+                            // 重要：保存成功后切换为编辑模式
+                            isAddingNew = false;
+                            editingProviderId = data.provider.id;
+                            await loadProviders();
+                            selectProvider(data.provider.id);
+                        } else {
+                            const error = await resp.json();
+                            showSettingsStatus(`❌ 保存失败: ${error.detail || '未知错误'}`, false);
+                        }
+                    } else {
+                        // 更新现有平台
+                        resp = await fetch(`/api/llm/providers/${editingProviderId}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name, base_url: url, api_key: key || null })
+                        });
+                        
+                        if (resp.ok) {
+                            showSettingsStatus('✅ 保存成功！', true);
+                            await loadProviders();
+                            selectProvider(editingProviderId);
+                        } else {
+                            const error = await resp.json();
+                            showSettingsStatus(`❌ 保存失败: ${error.detail || '未知错误'}`, false);
+                        }
+                    }
+                } catch (e) {
+                    showSettingsStatus(`❌ 保存失败: ${e.message}`, false);
+                }
+            }
+
+            // 获取平台模型列表
+            async function fetchProviderModels() {
+                if (!editingProviderId && !isAddingNew) return;
+                
+                const btn = document.getElementById('fetch-models-btn');
+                const originalText = btn.textContent;
+                btn.textContent = '获取中...';
+                btn.disabled = true;
+                
+                // 如果是新平台，先保存
+                if (isAddingNew) {
+                    showSettingsStatus('❌ 请先保存平台配置', false);
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                    return;
+                }
+                
+                try {
+                    const resp = await fetch(`/api/llm/providers/${editingProviderId}/models`, {
+                        method: 'POST'
+                    });
+                    
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        const select = document.getElementById('provider-model');
+                        const currentValue = select.value || document.getElementById('provider-model-custom').value;
+                        
+                        select.innerHTML = '<option value="">-- 选择模型 --</option>';
+                        data.models.forEach(m => {
+                            const opt = document.createElement('option');
+                            opt.value = m.id;
+                            opt.textContent = m.id + (m.owned_by ? ` (${m.owned_by})` : '');
+                            select.appendChild(opt);
+                        });
+                        
+                        // 恢复之前选中的值
+                        if (currentValue) {
+                            for (let opt of select.options) {
+                                if (opt.value === currentValue) {
+                                    select.value = currentValue;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        showSettingsStatus(`✅ 获取到 ${data.count} 个模型`, true);
+                        await loadProviders();  // 刷新缓存
+                    } else {
+                        const error = await resp.json();
+                        showSettingsStatus(`❌ 获取失败: ${error.detail || '未知错误'}`, false);
+                    }
+                } catch (e) {
+                    showSettingsStatus(`❌ 获取失败: ${e.message}`, false);
+                } finally {
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                }
+            }
+
+            // 测试平台连接
+            async function testProviderConnection() {
+                if (!editingProviderId) {
+                    showSettingsStatus('❌ 请先保存平台配置', false);
+                    return;
+                }
+                
+                // 获取用户选择的模型
+                const modelSelect = document.getElementById('provider-model').value;
+                const modelCustom = document.getElementById('provider-model-custom').value;
+                const model = modelSelect || modelCustom || null;
+                
+                showSettingsStatus('⏳ 正在测试连接...', true);
+                
+                try {
+                    const resp = await fetch(`/api/llm/providers/${editingProviderId}/test`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ model })
+                    });
+                    const result = await resp.json();
+                    
+                    if (result.success) {
+                        showSettingsStatus(`✅ ${result.message}${result.response ? '<br><small>' + result.response + '</small>' : ''}`, true);
+                    } else {
+                        showSettingsStatus(`❌ ${result.message}`, false);
+                    }
+                } catch (e) {
+                    showSettingsStatus(`❌ 测试失败: ${e.message}`, false);
+                }
+            }
+
+            // 使用此平台
+            async function useThisProvider() {
+                if (!editingProviderId) return;
+                
+                const modelSelect = document.getElementById('provider-model').value;
+                const modelCustom = document.getElementById('provider-model-custom').value;
+                const model = modelSelect || modelCustom || '';
+                
+                try {
+                    const resp = await fetch('/api/llm/active', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ provider_id: editingProviderId, model })
+                    });
+                    
+                    if (resp.ok) {
+                        showSettingsStatus('✅ 已切换到此平台，AI 分析将使用新配置', true);
+                        await loadProviders();
+                        // 刷新主页面的 AI 状态
+                        await fetchAIStatus();
+                    } else {
+                        const error = await resp.json();
+                        showSettingsStatus(`❌ 切换失败: ${error.detail || '未知错误'}`, false);
+                    }
+                } catch (e) {
+                    showSettingsStatus(`❌ 切换失败: ${e.message}`, false);
+                }
+            }
+
+            // 删除当前平台
+            async function deleteCurrentProvider() {
+                if (!editingProviderId || editingProviderId === 'mock') return;
+                
+                const provider = llmProviders.find(p => p.id === editingProviderId);
+                if (!confirm(`确定要删除平台 "${provider?.name}" 吗？`)) return;
+                
+                try {
+                    const resp = await fetch(`/api/llm/providers/${editingProviderId}`, {
+                        method: 'DELETE'
+                    });
+                    
+                    if (resp.ok) {
+                        showSettingsStatus('✅ 平台已删除', true);
+                        document.getElementById('provider-config-section').style.display = 'none';
+                        editingProviderId = null;
+                        await loadProviders();
+                    } else {
+                        const error = await resp.json();
+                        showSettingsStatus(`❌ 删除失败: ${error.detail || '未知错误'}`, false);
+                    }
+                } catch (e) {
+                    showSettingsStatus(`❌ 删除失败: ${e.message}`, false);
+                }
+            }
+
+            // 重置 LLM 配置
+            async function resetLLMConfig() {
+                if (!confirm('确定要重置所有配置吗？将恢复默认设置。')) return;
+                
+                try {
+                    const resp = await fetch('/api/llm/config', { method: 'DELETE' });
+                    if (resp.ok) {
+                        showSettingsStatus('✅ 配置已重置', true);
+                        document.getElementById('provider-config-section').style.display = 'none';
+                        editingProviderId = null;
+                        await loadProviders();
+                    } else {
+                        showSettingsStatus('❌ 重置失败', false);
+                    }
+                } catch (e) {
+                    showSettingsStatus(`❌ 重置失败: ${e.message}`, false);
+                }
+            }
+
+            // 初始化
+            document.addEventListener('DOMContentLoaded', async () => {
+                initChart();
+                bindEvents();
+                updateDateTime();
+                setInterval(updateDateTime, 1000);
+
+                // 初始化 WebSocket 连接
+                connectWebSocket();
+
+                // 绑定设置相关事件
+                document.getElementById('provider-url').addEventListener('input', updateProviderUrlPreview);
+                document.getElementById('settings-modal').addEventListener('click', (e) => {
+                    if (e.target.id === 'settings-modal') closeSettings();
+                });
+
+                await Promise.all([
+                    fetchExchangeRate(),
+                    fetchChartData(),
+                    fetchHistory(),
+                    fetchAnalysis(),
+                    fetchBankPrices(),
+                    fetchAlerts()
+                ]);
+
+                // 初始换算
+                doConvert();
+                
+                // 加载 AI 状态和模型列表
+                fetchAIStatus();
+                fetchSmartAnalysis();
+                fetchAnalysisModels();
+
+                // 备用轮询（WebSocket 断开时使用，降低频率）
+                setInterval(() => {
+                    if (!wsConnected) fetchChartData();
+                }, 30000);
+                setInterval(fetchHistory, 60000);           // 1分钟更新历史
+                setInterval(fetchExchangeRate, 1800000);    // 30分钟更新汇率
+                setInterval(fetchBankPrices, 60000);        // 1分钟更新银行金价
+                setInterval(fetchAlerts, 60000);            // 1分钟更新告警（WebSocket 补充）
+            });
+        </script>
+    </body>
+    </html>
+    

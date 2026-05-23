@@ -1,12 +1,21 @@
 """大模型分析模块 - 金价波动原因分析"""
 
+import logging
 import os
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
 from .config import settings
+
+logger = logging.getLogger(__name__)
+
+# 联网搜索时限定的可信财经来源（控制成本、提升质量）
+_SEARCH_ALLOWED_DOMAINS = [
+    "reuters.com", "kitco.com", "investing.com",
+    "bloomberg.com", "marketwatch.com", "fxstreet.com",
+]
 
 
 @dataclass
@@ -44,6 +53,8 @@ class SmartAnalysisReport:
     risk_warning: str  # 风险提示
     generated_at: datetime
     raw_response: str
+    web_search_used: bool = False  # 本次是否真正联网搜索
+    sources: list = field(default_factory=list)  # 引用来源 [{url, title}]
 
 
 class LLMProvider(ABC):
@@ -54,19 +65,50 @@ class LLMProvider(ABC):
         """分析金价波动"""
         pass
     
+    def supports_web_search(self) -> bool:
+        """该提供商当前配置下是否支持真正的联网搜索"""
+        return False
+
     async def smart_analyze(self) -> SmartAnalysisReport:
-        """智能分析 - 让 AI 搜索网络数据进行分析"""
+        """智能分析 - 优先真正联网搜索，不支持或失败时降级为无联网分析并明确标注"""
         prompt = self._build_smart_prompt()
+
+        if self.supports_web_search():
+            try:
+                text, sources = await self._call_llm_with_search(prompt)
+                if text and text.strip():
+                    report = self._parse_smart_response(text)
+                    report.web_search_used = True
+                    report.sources = sources
+                    return report
+                logger.warning("联网搜索返回空内容，降级为无联网分析")
+            except Exception as e:
+                logger.warning("联网搜索分析失败，降级为无联网分析: %s", e)
+
+        # 无联网（或降级）路径：明确标注，避免误导
         response = await self._call_llm(prompt)
-        return self._parse_smart_response(response)
-    
+        report = self._parse_smart_response(response)
+        report.web_search_used = False
+        report.risk_warning = (
+            "⚠️ 本次分析未启用联网搜索，价格与市场数据可能不是最新，仅供参考。\n"
+            + report.risk_warning
+        )
+        return report
+
     async def _call_llm(self, prompt: str) -> str:
-        """调用 LLM（子类实现）"""
+        """调用 LLM（子类实现，无联网）"""
+        raise NotImplementedError
+
+    async def _call_llm_with_search(self, prompt: str) -> tuple[str, list]:
+        """调用 LLM 并启用联网搜索（支持的子类实现）
+
+        返回: (正文文本, 来源列表[{url, title}])
+        """
         raise NotImplementedError
     
     def _build_smart_prompt(self) -> str:
         """构建智能分析提示词"""
-        today = datetime.now().strftime("%Y年%m月%d日")
+        today = datetime.now(timezone.utc).strftime("%Y年%m月%d日")
         return f"""你是一位专业的黄金市场分析师。今天是 {today}。
 
 请你搜索并分析最近一周的国际黄金价格走势，给出专业的市场分析报告。
@@ -181,7 +223,7 @@ class LLMProvider(ABC):
             sections["key_factors"] = factors if factors else ["市场供需变化", "宏观经济影响", "地缘政治因素"]
         
         return SmartAnalysisReport(
-            title=f"黄金市场分析报告 - {datetime.now().strftime('%Y-%m-%d')}",
+            title=f"黄金市场分析报告 - {datetime.now(timezone.utc).strftime('%Y-%m-%d')}",
             market_overview=sections["market_overview"] or "暂无数据",
             recent_trend=sections["recent_trend"] or "暂无数据",
             key_factors=sections["key_factors"] if isinstance(sections["key_factors"], list) else ["暂无数据"],
@@ -299,7 +341,7 @@ class AnthropicProvider(LLMProvider):
             raise ValueError("需要配置 Anthropic API Key")
 
     async def _call_llm(self, prompt: str) -> str:
-        """调用 Anthropic API"""
+        """调用 Anthropic API（无联网）"""
         import anthropic
         client = anthropic.AsyncAnthropic(api_key=self.api_key)
         message = await client.messages.create(
@@ -308,6 +350,40 @@ class AnthropicProvider(LLMProvider):
             messages=[{"role": "user", "content": prompt}]
         )
         return message.content[0].text
+
+    def supports_web_search(self) -> bool:
+        return True
+
+    async def _call_llm_with_search(self, prompt: str) -> tuple[str, list]:
+        """调用 Anthropic 并启用官方 web_search 服务端工具"""
+        import anthropic
+        client = anthropic.AsyncAnthropic(api_key=self.api_key, timeout=120.0)
+        message = await client.messages.create(
+            model=self.model,
+            max_tokens=2048,
+            messages=[{"role": "user", "content": prompt}],
+            tools=[{
+                "type": "web_search_20250305",
+                "name": "web_search",
+                "max_uses": 5,
+                "allowed_domains": _SEARCH_ALLOWED_DOMAINS,
+            }],
+        )
+        # 联网模式下 content 是 block 列表（server_tool_use / web_search_tool_result / text）
+        # 必须遍历取 text 块，不能再用 content[0].text
+        text_parts: list[str] = []
+        sources: list = []
+        seen: set[str] = set()
+        for block in message.content:
+            if getattr(block, "type", None) != "text":
+                continue
+            text_parts.append(getattr(block, "text", "") or "")
+            for c in (getattr(block, "citations", None) or []):
+                url = getattr(c, "url", None)
+                if url and url not in seen:
+                    seen.add(url)
+                    sources.append({"url": url, "title": getattr(c, "title", "") or ""})
+        return "".join(text_parts), sources
 
     async def analyze(self, context: AnalysisContext) -> AnalysisReport:
         prompt = self._build_prompt(context)
@@ -337,18 +413,47 @@ class OpenAIProvider(LLMProvider):
         return url
 
     async def _call_llm(self, prompt: str) -> str:
-        """调用 OpenAI API"""
+        """调用 OpenAI API（无联网）"""
         from openai import AsyncOpenAI
         client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
         response = await client.chat.completions.create(
             model=self.model,
             messages=[
-                {"role": "system", "content": "你是一位专业的黄金市场分析师，具有实时获取市场数据的能力。"},
+                {"role": "system", "content": "你是一位专业的黄金市场分析师。"},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=2048
         )
         return response.choices[0].message.content
+
+    def supports_web_search(self) -> bool:
+        # 仅 OpenAI 官方端点支持联网搜索；第三方兼容接口（DeepSeek/通义等）降级处理
+        return not self.base_url or "api.openai.com" in self.base_url
+
+    async def _call_llm_with_search(self, prompt: str) -> tuple[str, list]:
+        """调用 OpenAI Responses API 并启用 web_search 工具"""
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url, timeout=120.0)
+        response = await client.responses.create(
+            model=self.model,
+            tools=[{"type": "web_search"}],
+            input=prompt,
+        )
+        text = getattr(response, "output_text", "") or ""
+        sources: list = []
+        seen: set[str] = set()
+        try:
+            for item in (getattr(response, "output", None) or []):
+                for content in (getattr(item, "content", None) or []):
+                    for ann in (getattr(content, "annotations", None) or []):
+                        if getattr(ann, "type", "") == "url_citation":
+                            url = getattr(ann, "url", None)
+                            if url and url not in seen:
+                                seen.add(url)
+                                sources.append({"url": url, "title": getattr(ann, "title", "") or ""})
+        except Exception:
+            pass
+        return text, sources
 
     async def analyze(self, context: AnalysisContext) -> AnalysisReport:
         prompt = self._build_prompt(context)
@@ -384,7 +489,7 @@ class MockLLMProvider(LLMProvider):
     async def smart_analyze(self) -> SmartAnalysisReport:
         """模拟智能分析"""
         return SmartAnalysisReport(
-            title=f"黄金市场分析报告（模拟） - {datetime.now().strftime('%Y-%m-%d')}",
+            title=f"黄金市场分析报告（模拟） - {datetime.now(timezone.utc).strftime('%Y-%m-%d')}",
             market_overview="【模拟数据】当前国际金价约 2650 美元/盎司，本周小幅震荡。",
             recent_trend="【模拟数据】近一周金价在 2620-2680 美元区间内震荡，整体维持高位运行。",
             key_factors=[

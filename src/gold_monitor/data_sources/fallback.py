@@ -1,7 +1,6 @@
 """故障自动切换数据源"""
 
 import logging
-from datetime import datetime
 from .base import BaseDataSource, PriceData
 
 logger = logging.getLogger(__name__)

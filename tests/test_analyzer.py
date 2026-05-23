@@ -5,7 +5,8 @@ from datetime import datetime, timedelta, timezone
 
 from gold_monitor.analyzer import (
     GoldAnalyzer, AnalysisReport, AnalysisContext,
-    MockLLMProvider, create_llm_provider
+    MockLLMProvider, create_llm_provider,
+    LLMProvider, OpenAIProvider, SmartAnalysisReport,
 )
 
 
@@ -123,6 +124,70 @@ def test_create_invalid_provider():
     """测试创建无效提供商"""
     with pytest.raises(ValueError, match="不支持的 LLM 提供商"):
         create_llm_provider("invalid_provider")
+
+
+class _SearchableProvider(LLMProvider):
+    """测试用：可联网，按需模拟联网成功/失败"""
+
+    def __init__(self, search_ok=True):
+        self._search_ok = search_ok
+        self.search_called = False
+        self.plain_called = False
+
+    def supports_web_search(self):
+        return True
+
+    async def _call_llm_with_search(self, prompt):
+        self.search_called = True
+        if not self._search_ok:
+            raise RuntimeError("search boom")
+        return (
+            "### 市场概况\n金价上涨\n### 风险提示\n注意风险",
+            [{"url": "https://reuters.com/x", "title": "R"}],
+        )
+
+    async def _call_llm(self, prompt):
+        self.plain_called = True
+        return "### 市场概况\n无联网\n### 风险提示\n基础风险"
+
+    async def analyze(self, context):
+        raise NotImplementedError
+
+
+@pytest.mark.asyncio
+async def test_smart_analyze_uses_web_search_when_available():
+    """支持联网且联网成功时，标注 web_search_used 并带回来源"""
+    p = _SearchableProvider(search_ok=True)
+    report = await p.smart_analyze()
+    assert report.web_search_used is True
+    assert p.search_called and not p.plain_called
+    assert any("reuters" in s["url"] for s in report.sources)
+
+
+@pytest.mark.asyncio
+async def test_smart_analyze_degrades_when_search_fails():
+    """联网失败时降级为无联网分析，并在风险提示中明确标注"""
+    p = _SearchableProvider(search_ok=False)
+    report = await p.smart_analyze()
+    assert report.web_search_used is False
+    assert p.search_called and p.plain_called
+    assert "未启用联网搜索" in report.risk_warning
+    assert report.sources == []
+
+
+def test_openai_supports_web_search_only_for_official_endpoint():
+    """第三方兼容接口不应启用联网搜索"""
+    official = OpenAIProvider(api_key="k", base_url="https://api.openai.com/v1")
+    assert official.supports_web_search() is True
+    third_party = OpenAIProvider(api_key="k", base_url="https://api.deepseek.com")
+    assert third_party.supports_web_search() is False
+
+
+@pytest.mark.asyncio
+async def test_mock_provider_smart_analyze_marks_no_web_search():
+    report = await MockLLMProvider().smart_analyze()
+    assert isinstance(report, SmartAnalysisReport)
+    assert report.web_search_used is False
 
 
 @pytest.mark.asyncio

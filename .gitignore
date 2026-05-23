@@ -56,6 +56,7 @@ ssl/
 
 # 测试
 .pytest_cache/
+.tmp_pytest/
 .coverage
 htmlcov/
 .tox/
@@ -69,3 +70,4 @@ nul
 # 备份文件
 backup/
 *.bak
+.ace-tool/

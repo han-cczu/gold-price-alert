@@ -1,7 +1,8 @@
 """CLI 命令行入口 - 纯 Web 模式"""
 
 import argparse
-import sys
+
+from gold_monitor import __version__
 
 
 def main():
@@ -42,7 +43,7 @@ def main():
     parser.add_argument(
         "--version",
         action="version",
-        version="gold-monitor 0.1.0"
+        version=f"gold-monitor {__version__}"
     )
 
     args = parser.parse_args()
@@ -57,7 +58,7 @@ def run_server(host: str = "0.0.0.0", port: int = 8000, reload: bool = False):
 
     print(f"""
 ╔══════════════════════════════════════════════════════════════╗
-║              金价实时监控系统 v0.1.0                          ║
+║              金价实时监控系统 v{__version__}                          ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  访问地址: http://{host}:{port:<5}                              ║
 ║  健康检查: http://{host}:{port:<5}/health                       ║
