@@ -6,11 +6,21 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..llm_config import get_llm_config_manager, ModelProvider
 from ..schemas import (
-    ProviderRequest, ProviderUpdateRequest, SetActiveRequest, TestConnectionRequest
+    ProviderProbeRequest, ProviderRequest, ProviderUpdateRequest,
+    SetActiveRequest, TestConnectionRequest,
 )
 from ..state import require_admin_dep
 
 router = APIRouter()
+
+
+def _resolve_credentials(provider, req_api_key, req_base_url):
+    """解析有效凭据：优先用请求体里（表单未保存）的值；为空或脱敏则回退到已保存配置。"""
+    api_key = (req_api_key or "").strip()
+    if not api_key or "..." in api_key:
+        api_key = provider.api_key
+    base_url = (req_base_url or "").strip() or provider.base_url
+    return api_key, base_url
 
 
 @router.get("/api/llm/config")
@@ -144,8 +154,11 @@ async def set_active_provider(request: SetActiveRequest):
 
 
 @router.post("/api/llm/providers/{provider_id}/models")
-async def fetch_provider_models(provider_id: str):
-    """获取指定平台的模型列表"""
+async def fetch_provider_models(provider_id: str, request: Optional[ProviderProbeRequest] = None):
+    """获取指定平台的模型列表。
+
+    允许使用表单中尚未保存的 key/url（通过请求体传入），无需先点保存即可获取。
+    """
     import httpx
 
     manager = get_llm_config_manager()
@@ -157,14 +170,21 @@ async def fetch_provider_models(provider_id: str):
     if provider_id == "mock":
         return {"success": True, "models": [], "count": 0, "message": "Mock 模式无模型"}
 
-    if not provider.api_key:
-        raise HTTPException(status_code=400, detail="请先配置 API Key")
+    # 优先用表单当前（未保存）的 key/url，为空或脱敏则回退到已保存配置
+    api_key, base_url = _resolve_credentials(
+        provider,
+        request.api_key if request else None,
+        request.base_url if request else None,
+    )
 
-    if not provider.base_url:
-        raise HTTPException(status_code=400, detail="请先配置 API 地址")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="请先填写 API Key")
+
+    if not base_url:
+        raise HTTPException(status_code=400, detail="请先填写 API 地址")
 
     # 智能拼接 URL
-    url = provider.base_url.rstrip('/')
+    url = base_url.rstrip('/')
     if not url.endswith('/v1') and '/v1' not in url:
         models_url = f"{url}/v1/models"
     else:
@@ -174,7 +194,7 @@ async def fetch_provider_models(provider_id: str):
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
                 models_url,
-                headers={"Authorization": f"Bearer {provider.api_key}"}
+                headers={"Authorization": f"Bearer {api_key}"}
             )
 
             if resp.status_code == 401:
@@ -240,6 +260,13 @@ async def test_provider_connection(provider_id: str, request: Optional[TestConne
     if not provider:
         raise HTTPException(status_code=404, detail="平台不存在")
 
+    # 优先用表单当前（未保存）的 key/url，为空或脱敏则回退到已保存配置
+    api_key, base_url = _resolve_credentials(
+        provider,
+        request.api_key if request else None,
+        request.base_url if request else None,
+    )
+
     # 获取要测试的模型
     test_model = request.model if request and request.model else None
 
@@ -275,11 +302,11 @@ async def test_provider_connection(provider_id: str, request: Optional[TestConne
         result["message"] = "Mock 模式无需连接测试"
         return result
 
-    if not provider.api_key:
+    if not api_key:
         result["message"] = "未配置 API Key"
         return result
 
-    if not provider.base_url:
+    if not base_url:
         result["message"] = "未配置 API 地址"
         return result
 
@@ -292,10 +319,10 @@ async def test_provider_connection(provider_id: str, request: Optional[TestConne
         from ..analyzer import OpenAIProvider
 
         # 标准化 URL
-        base_url = OpenAIProvider._normalize_base_url(provider.base_url)
+        normalized_base_url = OpenAIProvider._normalize_base_url(base_url)
 
         # 创建客户端
-        client = AsyncOpenAI(api_key=provider.api_key, base_url=base_url)
+        client = AsyncOpenAI(api_key=api_key, base_url=normalized_base_url)
 
         # 简单发送 "hi" 测试连接
         response = await client.chat.completions.create(

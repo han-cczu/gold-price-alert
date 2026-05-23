@@ -2051,7 +2051,12 @@
                 
                 try {
                     const resp = await fetch(`/api/llm/providers/${editingProviderId}/models`, {
-                        method: 'POST'
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            api_key: document.getElementById('provider-key').value || null,
+                            base_url: document.getElementById('provider-url').value || null
+                        })
                     });
                     
                     if (resp.ok) {
@@ -2109,7 +2114,11 @@
                     const resp = await fetch(`/api/llm/providers/${editingProviderId}/test`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ model })
+                        body: JSON.stringify({
+                            model,
+                            api_key: document.getElementById('provider-key').value || null,
+                            base_url: document.getElementById('provider-url').value || null
+                        })
                     });
                     const result = await resp.json();
                     

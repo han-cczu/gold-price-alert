@@ -126,9 +126,20 @@ class RefreshAnalysisRequest(BaseModel):
     model: Optional[str] = None
 
 
+class ProviderProbeRequest(BaseModel):
+    """探测请求（获取模型列表）：允许携带表单中尚未保存的 key/url。
+
+    api_key/base_url 为空或脱敏（含 "..."）时，后端回退到已保存的平台配置。
+    """
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+
+
 class TestConnectionRequest(BaseModel):
-    """测试连接请求"""
+    """测试连接请求：允许携带表单中尚未保存的 key/url。"""
     model: Optional[str] = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
 
 
 class NotificationConfigRequest(BaseModel):
