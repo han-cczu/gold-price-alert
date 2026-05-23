@@ -1209,8 +1209,7 @@
                     return marked.parse(text);
                 } catch (e) {
                     console.error('Markdown 解析失败:', e);
-                    return text.replace(/
-/g, '<br>');
+                    return text.replace(/\n/g, '<br>');
                 }
             }
 
