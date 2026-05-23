@@ -615,10 +615,6 @@
                                 style="padding:6px 12px; border-radius:15px; border:none; background:#fff; color:#333; font-size:12px; cursor:pointer; min-width:150px;">
                             <option value="">选择模型...</option>
                         </select>
-                        <button onclick="fetchAnalysisModels()" id="fetch-analysis-models-btn"
-                                style="padding:6px 12px; background:rgba(255,255,255,0.15); color:#fff; border:none; border-radius:15px; cursor:pointer; font-size:12px;">
-                            获取模型
-                        </button>
                         <span id="analysis-cache-info" style="font-size:12px; opacity:0.8;"></span>
                         <button onclick="refreshSmartAnalysis()" id="refresh-analysis-btn"
                                 style="padding:8px 16px; background:rgba(255,255,255,0.2); color:#fff; border:none; border-radius:20px; cursor:pointer; font-size:13px; transition:all 0.2s;">
@@ -1085,54 +1081,31 @@
             let smartAnalysisData = null;
             let analysisModels = [];  // 当前平台的模型列表
 
-            // 获取当前平台的模型列表（用于分析）
-            async function fetchAnalysisModels() {
-                const btn = document.getElementById('fetch-analysis-models-btn');
-                btn.textContent = '获取中...';
-                btn.disabled = true;
-                
+            // 从已保存的缓存填充模型下拉（不发起 live 请求；获取模型在设置界面完成）
+            async function loadAnalysisModels() {
                 try {
-                    // 先获取当前激活的平台
-                    const configResp = await fetch('/api/llm/providers');
-                    if (!configResp.ok) return;
-                    
-                    const config = await configResp.json();
-                    const activeId = config.active_provider_id;
-                    
-                    if (!activeId || activeId === 'mock') {
-                        alert('当前使用 Mock 模式，请先配置 AI 平台');
-                        return;
-                    }
-                    
-                    // 获取模型列表
-                    const resp = await fetch(`/api/llm/providers/${activeId}/models`, { method: 'POST' });
-                    if (resp.ok) {
-                        const data = await resp.json();
-                        analysisModels = data.models;
-                        
-                        // 填充下拉框
-                        const select = document.getElementById('analysis-model-select');
-                        select.innerHTML = '<option value="">选择模型...</option>';
-                        data.models.forEach(m => {
-                            const opt = document.createElement('option');
-                            opt.value = m.id;
-                            opt.textContent = m.id;
-                            select.appendChild(opt);
-                        });
-                        
-                        // 如果有活跃模型，选中它
-                        if (config.active_model) {
-                            select.value = config.active_model;
-                        }
-                    } else {
-                        const error = await resp.json();
-                        alert('获取模型失败: ' + (error.detail || '未知错误'));
+                    const resp = await fetch('/api/llm/providers');
+                    if (!resp.ok) return;
+
+                    const config = await resp.json();
+                    const active = (config.providers || []).find(p => p.id === config.active_provider_id);
+                    analysisModels = (active && active.models) ? active.models : [];
+
+                    const select = document.getElementById('analysis-model-select');
+                    select.innerHTML = '<option value="">默认模型</option>';
+                    analysisModels.forEach(id => {
+                        const opt = document.createElement('option');
+                        opt.value = id;
+                        opt.textContent = id;
+                        select.appendChild(opt);
+                    });
+
+                    // 选中当前激活的模型
+                    if (config.active_model) {
+                        select.value = config.active_model;
                     }
                 } catch (e) {
-                    console.error('获取模型失败', e);
-                } finally {
-                    btn.textContent = '获取模型';
-                    btn.disabled = false;
+                    console.warn('加载模型列表失败', e);
                 }
             }
 
@@ -2237,7 +2210,7 @@
                 // 加载 AI 状态和模型列表
                 fetchAIStatus();
                 fetchSmartAnalysis();
-                fetchAnalysisModels();
+                loadAnalysisModels();
 
                 // 备用轮询（WebSocket 断开时使用，降低频率）
                 setInterval(() => {
