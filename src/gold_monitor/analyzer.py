@@ -394,10 +394,29 @@ class AnthropicProvider(LLMProvider):
 class OpenAIProvider(LLMProvider):
     """OpenAI 提供商（兼容 API）"""
 
-    def __init__(self, api_key: str | None = None, base_url: str | None = None, model: str | None = None):
+    # function-calling 联网循环最多轮数，防止模型反复调用搜索导致死循环
+    MAX_TOOL_ROUNDS = 3
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
+        tavily_api_key: str | None = None,
+    ):
         self.api_key = api_key or settings.openai_api_key
         self.base_url = self._normalize_base_url(base_url or settings.openai_base_url)
-        self.model = model or "gpt-4o-mini"
+        # model 默认值修正：deepseek 端点未显式给 model 时用 deepseek-chat 兜底
+        if model:
+            self.model = model
+        elif self.base_url and "deepseek" in self.base_url:
+            self.model = "deepseek-chat"
+        else:
+            self.model = "gpt-4o-mini"
+        # 读实例值而非每次读全局，保证测试隔离
+        self._tavily_api_key = (
+            tavily_api_key if tavily_api_key is not None else settings.tavily_api_key
+        ) or ""
         if not self.api_key:
             raise ValueError("需要配置 OpenAI API Key")
     
@@ -427,11 +446,26 @@ class OpenAIProvider(LLMProvider):
         return response.choices[0].message.content
 
     def supports_web_search(self) -> bool:
-        # 仅 OpenAI 官方端点支持联网搜索；第三方兼容接口（DeepSeek/通义等）降级处理
+        # 配了 Tavily → 任意兼容接口（含 DeepSeek）均可通过 function-calling 联网
+        if self._tavily_api_key:
+            return True
+        # 否则仅 OpenAI 官方端点支持原生联网搜索；第三方兼容接口降级处理
         return not self.base_url or "api.openai.com" in self.base_url
 
     async def _call_llm_with_search(self, prompt: str) -> tuple[str, list]:
-        """调用 OpenAI Responses API 并启用 web_search 工具"""
+        """调用 LLM 并启用联网搜索。
+
+        分流：
+        - 官方 OpenAI 端点且未配 Tavily → 走原生 Responses API web_search（保持不变）。
+        - 配了 Tavily（含 DeepSeek/兼容接口）→ 走 function-calling + Tavily 路径。
+        """
+        is_official = not self.base_url or "api.openai.com" in self.base_url
+        if is_official and not self._tavily_api_key:
+            return await self._search_via_responses_api(prompt)
+        return await self._search_via_tavily_tools(prompt)
+
+    async def _search_via_responses_api(self, prompt: str) -> tuple[str, list]:
+        """调用 OpenAI Responses API 并启用原生 web_search 工具"""
         from openai import AsyncOpenAI
         client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url, timeout=120.0)
         response = await client.responses.create(
@@ -454,6 +488,114 @@ class OpenAIProvider(LLMProvider):
         except Exception:
             pass
         return text, sources
+
+    async def _search_via_tavily_tools(self, prompt: str) -> tuple[str, list]:
+        """function-calling 联网循环：模型决定搜什么，我们用 Tavily 执行并回传结果。
+
+        用非思考模式（不传 thinking/extra_body），规避 DeepSeek 思考模式下
+        "需回传 reasoning_content 否则 400" 的复杂度。
+
+        Tavily 调用或网络硬失败会向上抛，交由 smart_analyze 降级。
+        """
+        import json
+
+        from openai import AsyncOpenAI
+
+        from .web_search import tavily_search
+
+        client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url, timeout=120.0)
+        tools: list[Any] = [{
+            "type": "function",
+            "function": {
+                "name": "web_search",
+                "description": "搜索最近一周的国际黄金市场/财经新闻与价格数据，返回带来源链接的结果",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "搜索关键词，中英文均可"}
+                    },
+                    "required": ["query"],
+                },
+            },
+        }]
+        messages: list[Any] = [
+            {"role": "system", "content": "你是专业黄金市场分析师，必要时调用 web_search 获取最新数据"},
+            {"role": "user", "content": prompt},
+        ]
+        sources: list = []
+        seen: set[str] = set()
+        last_content = ""
+
+        for _ in range(self.MAX_TOOL_ROUNDS):
+            resp = await client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                max_tokens=2048,
+                timeout=120.0,
+            )
+            msg = resp.choices[0].message
+            last_content = msg.content or ""
+            # 把助手消息追加进历史（含 tool_calls），供下一轮回传 tool 结果
+            messages.append(msg.model_dump(exclude_none=True))
+
+            tool_calls = getattr(msg, "tool_calls", None)
+            if not tool_calls:
+                return last_content, sources
+
+            for tc in tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments)
+                    query = args.get("query", "")
+                except (ValueError, AttributeError, TypeError) as e:
+                    logger.warning("解析 web_search 工具参数失败: %s", e)
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": "工具参数解析失败，请重试或直接基于已有信息回答。",
+                    })
+                    continue
+
+                results = await tavily_search(
+                    query,
+                    api_key=self._tavily_api_key,
+                    include_domains=_SEARCH_ALLOWED_DOMAINS,
+                )
+                tool_payload = []
+                for r in results:
+                    url = r.get("url")
+                    title = r.get("title", "") or ""
+                    if url and url not in seen:
+                        seen.add(url)
+                        sources.append({"url": url, "title": title})
+                    tool_payload.append({
+                        "url": url,
+                        "title": title,
+                        "content": r.get("content", "") or "",
+                    })
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": json.dumps(tool_payload, ensure_ascii=False),
+                })
+
+        # 轮数用尽仍未收敛：再做一次不带工具的调用，让模型基于已搜集的搜索结果给出终稿，
+        # 避免直接返回空内容被迫降级（白白浪费已执行的搜索）
+        try:
+            final = await client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=2048,
+                timeout=120.0,
+            )
+            final_content = final.choices[0].message.content or ""
+            if final_content.strip():
+                return final_content, sources
+        except Exception as e:
+            logger.warning("联网搜索终稿调用失败，回退到最后一次内容: %s", e)
+
+        return last_content, sources
 
     async def analyze(self, context: AnalysisContext) -> AnalysisReport:
         prompt = self._build_prompt(context)

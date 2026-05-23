@@ -18,6 +18,7 @@ dependencies = [
     "aiohttp>=3.9",
     "anthropic>=0.40",  # web_search 服务端工具（联网分析）
     "openai>=1.66",     # Responses API web_search 工具（联网分析）
+    "tavily-python>=0.5.0",  # Tavily 搜索后端（DeepSeek/兼容接口 function-calling 联网）
     "fastapi>=0.109",
     "uvicorn>=0.27",
     "websockets>=12.0",  # WebSocket 支持

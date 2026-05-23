@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="", description="Anthropic API Key")
     openai_api_key: str = Field(default="", description="OpenAI API Key")
     openai_base_url: str = Field(default="", description="OpenAI API Base URL（用于兼容接口）")
+    tavily_api_key: str = Field(
+        default="",
+        description="Tavily 搜索 API Key（启用 DeepSeek/兼容接口的真实联网搜索）"
+    )
 
     # 安全配置
     secret_key: str = Field(default="", description="主密钥（用于加密存储）")
