@@ -1,5 +1,6 @@
 """银行金价数据源 - 获取各大银行实时金价"""
 
+import logging
 import httpx
 import re
 from datetime import datetime, timezone
@@ -7,6 +8,8 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .base import BaseDataSource, PriceData
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -101,10 +104,10 @@ class BankGoldDataSource(BaseDataSource):
             # 3. 计算人民币克价
             # 1 盎司 = 31.1035 克
             self._base_price_cny = (international_price * usd_cny) / 31.1035
-            
-        except Exception:
-            pass
-        
+
+        except Exception as e:
+            logger.warning("获取银行基准金价失败，沿用上次值 %.2f CNY/g: %s", self._base_price_cny, e)
+
         return self._base_price_cny
 
     async def fetch_all_bank_prices(self) -> list[BankGoldPrice]:

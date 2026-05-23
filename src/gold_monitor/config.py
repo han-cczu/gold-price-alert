@@ -2,7 +2,6 @@
 
 from pydantic_settings import BaseSettings
 from pydantic import Field, ConfigDict
-from pathlib import Path
 
 
 class Settings(BaseSettings):
@@ -70,12 +69,20 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="", description="Anthropic API Key")
     openai_api_key: str = Field(default="", description="OpenAI API Key")
     openai_base_url: str = Field(default="", description="OpenAI API Base URL（用于兼容接口）")
+    tavily_api_key: str = Field(
+        default="",
+        description="Tavily 搜索 API Key（启用 DeepSeek/兼容接口的真实联网搜索）"
+    )
 
     # 安全配置
     secret_key: str = Field(default="", description="主密钥（用于加密存储）")
     admin_api_key: str = Field(default="", description="管理接口 API Key")
     rate_limit_per_minute: int = Field(default=60, description="每分钟请求限制")
     enable_auth: bool = Field(default=False, description="是否启用接口鉴权")
+    cors_allow_origins: str = Field(
+        default="",
+        description="CORS 允许的来源，逗号分隔；为空表示仅同源（不允许跨域携带凭证）"
+    )
 
     # 数据生命周期配置
     data_retention_days: int = Field(default=30, description="分钟级数据保留天数")

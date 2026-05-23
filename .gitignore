@@ -38,6 +38,9 @@ env/
 .env.local
 .env.*.local
 
+# LLM 运行时配置（含 API Key，禁止入库）
+llm_config.json
+
 # 数据库文件
 *.db
 *.sqlite
@@ -56,6 +59,7 @@ ssl/
 
 # 测试
 .pytest_cache/
+.tmp_pytest/
 .coverage
 htmlcov/
 .tox/
@@ -69,3 +73,4 @@ nul
 # 备份文件
 backup/
 *.bak
+.ace-tool/

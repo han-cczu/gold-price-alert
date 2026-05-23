@@ -5,10 +5,12 @@ import hashlib
 import logging
 import os
 import secrets
-from functools import wraps
 from typing import Optional
 
+from cryptography.fernet import Fernet, InvalidToken
 from fastapi import HTTPException, Request, status
+
+from .config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +32,9 @@ class SecretManager:
             self._key = self._generate_key()
             logger.warning("未配置 GOLD_SECRET_KEY，使用自动生成的密钥（重启后将无法解密旧数据）")
 
-        # 派生加密密钥
+        # 派生加密密钥（PBKDF2 -> 32 字节），并初始化 Fernet（AES-CBC + HMAC，带完整性校验）
         self._derived_key = self._derive_key(self._key)
+        self._fernet = Fernet(base64.urlsafe_b64encode(self._derived_key))
 
     def _generate_key(self) -> str:
         """生成随机密钥"""
@@ -48,55 +51,34 @@ class SecretManager:
         )
 
     def encrypt(self, plaintext: str) -> str:
-        """加密字符串（使用 XOR + Base64，轻量级方案）
-        
-        注意：这是一个轻量级加密方案，适用于配置文件存储
-        如需更高安全性，可以使用 cryptography.fernet
-        """
+        """加密字符串（cryptography.fernet：AES-128-CBC + HMAC，带完整性校验）"""
         if not plaintext:
             return ""
 
         try:
-            # 生成随机 IV
-            iv = secrets.token_bytes(16)
-
-            # XOR 加密
-            key_stream = self._derived_key * (len(plaintext) // 32 + 1)
-            encrypted = bytes([
-                ord(c) ^ key_stream[i] ^ iv[i % 16]
-                for i, c in enumerate(plaintext)
-            ])
-
-            # 组合 IV + 密文
-            result = iv + encrypted
-            return base64.urlsafe_b64encode(result).decode()
+            return self._fernet.encrypt(plaintext.encode()).decode()
         except Exception as e:
             logger.error("加密失败: %s", e)
             return ""
 
     def decrypt(self, ciphertext: str) -> str:
-        """解密字符串"""
+        """解密字符串
+
+        无法解密时安全降级返回空串（不抛出）。常见原因：
+        - 旧版 XOR 格式的历史密文（不再兼容，需重新录入密钥）
+        - 主密钥变更或密文被篡改
+        """
         if not ciphertext:
             return ""
 
         try:
-            # 解码
-            data = base64.urlsafe_b64decode(ciphertext.encode())
-            if len(data) < 17:
-                return ""
-
-            # 提取 IV 和密文
-            iv = data[:16]
-            encrypted = data[16:]
-
-            # XOR 解密
-            key_stream = self._derived_key * (len(encrypted) // 32 + 1)
-            decrypted = bytes([
-                b ^ key_stream[i] ^ iv[i % 16]
-                for i, b in enumerate(encrypted)
-            ])
-
-            return decrypted.decode()
+            return self._fernet.decrypt(ciphertext.encode()).decode()
+        except InvalidToken:
+            logger.warning(
+                "解密失败：密文无效或密钥不匹配（可能是旧 XOR 格式密文或 GOLD_SECRET_KEY 已变更），"
+                "请重新录入对应密钥"
+            )
+            return ""
         except Exception as e:
             logger.error("解密失败: %s", e)
             return ""
@@ -151,9 +133,12 @@ class APIKeyAuth:
         return key and secrets.compare_digest(key, self._admin_key)
 
     async def require_admin(self, request: Request):
-        """要求管理员权限（作为依赖项使用）"""
-        if not self._admin_key:
-            # 如果未配置 API Key，则不需要验证（开发模式）
+        """要求管理员权限（作为 FastAPI 依赖项使用，提供独立于中间件的纵深防御）
+
+        与中间件保持一致：仅在 enable_auth=True 时强制校验，
+        默认开发模式（enable_auth=False）放行。
+        """
+        if not settings.enable_auth:
             return True
 
         if not self.verify_admin_key(request):
@@ -228,12 +213,14 @@ class RateLimiter:
 # ============ 敏感路径保护 ============
 
 # 需要管理员权限的路径前缀
+# 使用宽前缀覆盖整个敏感命名空间，避免遗漏个别端点（如 /api/data/export、
+# /api/data/backups、/api/notifications/logs 此前未被覆盖）。
 ADMIN_PATHS = [
     "/api/llm/",
     "/api/collector/config",
-    "/api/notifications/config",
-    "/api/data/cleanup",
-    "/api/data/backup",
+    "/api/collector/fill-gaps",
+    "/api/data/",            # stats / export / cleanup / backup / backups 全部纳入
+    "/api/notifications/",   # config / logs / test 全部纳入
 ]
 
 # 需要限流的路径前缀

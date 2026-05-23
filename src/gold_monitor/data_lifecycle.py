@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 from .config import settings
-from .models import Database, GoldPrice
+from .models import Database
 
 logger = logging.getLogger(__name__)
 

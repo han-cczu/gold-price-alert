@@ -1,12 +1,14 @@
 """告警模块测试"""
 
+import shutil
+import tempfile
+
 import pytest
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, AsyncMock
 
 from gold_monitor.alert import (
     AlertMonitor, Alert, AlertType,
-    ConsoleNotification, NotificationChannel
+    ConsoleNotification, NotificationChannel, VolatilityDetector
 )
 from gold_monitor.data_sources.base import PriceData
 from gold_monitor.models import Database
@@ -24,12 +26,14 @@ class MockNotification(NotificationChannel):
 
 
 @pytest.fixture
-def mock_db(tmp_path):
+def mock_db():
     """创建临时数据库"""
-    db_path = tmp_path / "test.db"
+    tmp_dir = tempfile.mkdtemp()
+    db_path = f"{tmp_dir}/test.db"
     db = Database(f"sqlite:///{db_path}")
     db.create_tables()
-    return db
+    yield db
+    shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 @pytest.fixture
@@ -62,6 +66,8 @@ async def test_threshold_upper_alert(alert_monitor, mock_notification):
     )
 
     alerts = await alert_monitor.check_price(price_data)
+    # 通知现在是后台分发，断言前需等待其完成
+    await alert_monitor.wait_pending_notifications()
 
     assert len(alerts) == 1
     assert alerts[0].alert_type == AlertType.THRESHOLD_UPPER
@@ -145,6 +151,73 @@ async def test_alert_cooldown(alert_monitor, mock_notification):
     # 只有第一次触发的告警
     threshold_alerts = [a for a in alerts2 if a.alert_type == AlertType.THRESHOLD_UPPER]
     assert len(threshold_alerts) == 0
+
+
+@pytest.mark.asyncio
+async def test_notification_log_links_alert_id(alert_monitor, mock_notification, mock_db):
+    """通知日志应正确关联告警记录ID（修复前 alert_id 恒为 NULL）"""
+    from gold_monitor.models import AlertRecord
+
+    price_data = PriceData(
+        price=2150.0,
+        currency="USD",
+        timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
+        source="test",
+    )
+
+    await alert_monitor.check_price(price_data)
+    await alert_monitor.wait_pending_notifications()
+
+    with mock_db.get_session() as session:
+        rec = session.query(AlertRecord).filter(
+            AlertRecord.alert_type == "threshold_upper"
+        ).first()
+        assert rec is not None
+        rec_id = rec.id
+
+    logs = mock_db.get_notification_logs()
+    assert len(logs) >= 1
+    assert any(log.alert_id == rec_id for log in logs)
+
+
+# ============ VolatilityDetector 抗噪多条件 ============
+
+def _series(values):
+    base = datetime.now(timezone.utc).replace(tzinfo=None)
+    return [(base + timedelta(minutes=i), v) for i, v in enumerate(values)]
+
+
+def test_volatility_detector_too_few_points_returns_none():
+    det = VolatilityDetector()
+    assert det.analyze(_series([2000.0])) is None
+
+
+def test_volatility_detector_alerts_on_clean_trend():
+    """涨幅达标 + 连续同向 + 振幅可控 -> 触发"""
+    det = VolatilityDetector(threshold_percent=1.0, min_consecutive=3, max_amplitude=5.0)
+    result = det.analyze(_series([2000.0, 2010.0, 2020.0, 2030.0]))
+    assert det.should_alert(result) is True
+
+
+def test_volatility_detector_below_threshold_no_alert():
+    det = VolatilityDetector(threshold_percent=1.0, min_consecutive=3, max_amplitude=5.0)
+    result = det.analyze(_series([2000.0, 2002.0, 2004.0, 2006.0]))  # 仅 +0.3%
+    assert det.should_alert(result) is False
+
+
+def test_volatility_detector_rejects_high_amplitude_noise():
+    """涨幅达标但剧烈震荡（大振幅）-> 视为噪声不报警"""
+    det = VolatilityDetector(threshold_percent=1.0, min_consecutive=3, max_amplitude=5.0)
+    result = det.analyze(_series([2000.0, 2200.0, 1900.0, 2030.0]))  # 振幅 ~15%
+    assert det.should_alert(result) is False
+
+
+def test_volatility_detector_rejects_insufficient_consecutive():
+    """涨幅达标但方向反复（连续同向不足）-> 不报警"""
+    det = VolatilityDetector(threshold_percent=1.0, min_consecutive=3, max_amplitude=50.0)
+    result = det.analyze(_series([2000.0, 2031.0, 2030.0, 2030.5]))
+    assert result.consecutive_trend < 3
+    assert det.should_alert(result) is False
 
 
 @pytest.mark.asyncio

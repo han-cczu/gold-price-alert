@@ -1,7 +1,6 @@
 """Web API 测试"""
 
 import pytest
-from datetime import datetime, timedelta
 from fastapi.testclient import TestClient
 
 # 设置测试环境变量

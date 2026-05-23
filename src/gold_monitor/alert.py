@@ -3,10 +3,10 @@
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Callable, Optional
+from typing import Optional
 import statistics
 
 from .config import settings
@@ -357,6 +357,7 @@ class NotificationManager:
             channel_name = channel.__class__.__name__
             success = False
             last_error = None
+            attempt = 0  # 防止 max_retries=0 时下方引用未定义
 
             for attempt in range(self._max_retries):
                 try:
@@ -431,6 +432,9 @@ class AlertMonitor:
 
         # 通知管理器
         self._notification_manager = NotificationManager(database, self._channels)
+
+        # 后台通知任务追踪（避免通知阻塞采集循环）
+        self._pending_notifications: set[asyncio.Task] = set()
 
         # 状态持久化控制
         self._last_persist_time: datetime = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -520,6 +524,24 @@ class AlertMonitor:
 
         return record.id
 
+    def _dispatch_notification(self, alert: Alert, record_id: int | None = None):
+        """后台分发通知，避免通知重试/退避阻塞采集循环"""
+        if not self._channels:
+            return
+        task = asyncio.create_task(
+            self._notification_manager.send_with_retry(alert, record_id)
+        )
+        # 持有引用直到完成，避免任务被 GC 回收（"task was destroyed"）
+        self._pending_notifications.add(task)
+        task.add_done_callback(self._pending_notifications.discard)
+
+    async def wait_pending_notifications(self):
+        """等待所有后台通知任务完成（用于测试与优雅关闭）"""
+        if self._pending_notifications:
+            await asyncio.gather(
+                *list(self._pending_notifications), return_exceptions=True
+            )
+
     def _update_price_history(self, price: float, timestamp: datetime):
         """更新价格历史"""
         self._price_history.append((timestamp, price))
@@ -545,6 +567,7 @@ class AlertMonitor:
     async def check_price(self, price_data: PriceData) -> list[Alert]:
         """检查价格并触发告警"""
         alerts = []
+        alert_ids: list[int] = []  # 与 alerts 一一对应的告警记录ID
         now = price_data.timestamp
         price = price_data.price
 
@@ -560,7 +583,7 @@ class AlertMonitor:
                 triggered_at=now
             )
             alerts.append(alert)
-            alert_id = self._record_alert(alert)
+            alert_ids.append(self._record_alert(alert))
 
         # 检查下限告警
         if price <= self._threshold_lower and self._should_alert(AlertType.THRESHOLD_LOWER):
@@ -571,7 +594,7 @@ class AlertMonitor:
                 triggered_at=now
             )
             alerts.append(alert)
-            alert_id = self._record_alert(alert)
+            alert_ids.append(self._record_alert(alert))
 
         # 检查波动告警（使用智能或简单算法）
         if self._use_smart_volatility:
@@ -603,7 +626,7 @@ class AlertMonitor:
                         change_percent=result.change_percent
                     )
                     alerts.append(alert)
-                    alert_id = self._record_alert(alert)
+                    alert_ids.append(self._record_alert(alert))
         else:
             # 使用简单的波动检测
             volatility = self._calculate_volatility()
@@ -619,13 +642,11 @@ class AlertMonitor:
                         change_percent=change_percent
                     )
                     alerts.append(alert)
-                    alert_id = self._record_alert(alert)
+                    alert_ids.append(self._record_alert(alert))
 
-        # 发送通知（使用通知管理器，支持重试）
-        for alert in alerts:
-            if self._channels:
-                # 获取告警记录ID
-                await self._notification_manager.send_with_retry(alert)
+        # 发送通知（后台分发，避免阻塞采集循环；通知失败重试不应拖慢价格采集）
+        for alert, record_id in zip(alerts, alert_ids):
+            self._dispatch_notification(alert, record_id)
 
         # 定期持久化状态
         self._persist_state()

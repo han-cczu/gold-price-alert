@@ -16,13 +16,14 @@ dependencies = [
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "aiohttp>=3.9",
-    "anthropic>=0.18",
-    "openai>=1.10",
+    "anthropic>=0.40",  # web_search 服务端工具（联网分析）
+    "openai>=1.66",     # Responses API web_search 工具（联网分析）
+    "tavily-python>=0.5.0",  # Tavily 搜索后端（DeepSeek/兼容接口 function-calling 联网）
     "fastapi>=0.109",
     "uvicorn>=0.27",
     "websockets>=12.0",  # WebSocket 支持
     # P0: 安全依赖
-    "cryptography>=41.0.0",  # 密钥加密（可选，轻量级方案不需要）
+    "cryptography>=41.0.0",  # 密钥加密（Fernet，敏感信息加密存储）
     # P1: 可观测性
     "prometheus-client>=0.19.0",  # 指标暴露
 ]
@@ -41,3 +42,10 @@ gold-monitor = "gold_monitor.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+gold_monitor = ["static/*.html"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

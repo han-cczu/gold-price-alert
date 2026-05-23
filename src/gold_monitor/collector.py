@@ -472,48 +472,44 @@ class AdvancedCollector:
             return (source.name, None, 0)
 
     async def _fetch_parallel_first(self) -> Optional[PriceData]:
-        """并行采集，取最快返回的结果"""
+        """并行采集，取最快返回的有效结果
+
+        关键修复：最快完成的源若失败（返回 None），继续等待其它仍在运行的源，
+        而不是直接放弃。只有在拿到有效结果或全部完成后才取消剩余任务。
+        """
         if not self._sources:
             await self._init_sources()
 
-        tasks = [
+        tasks = {
             asyncio.create_task(self._fetch_from_source(source))
             for source in self._sources
-        ]
-
-        # 等待第一个成功的结果
-        done, pending = await asyncio.wait(
-            tasks,
-            return_when=asyncio.FIRST_COMPLETED
-        )
+        }
 
         result = None
-        for task in done:
-            name, price_data, latency = task.result()
-            if price_data:
-                result = price_data
-                logger.info(
-                    "并行采集: %s 最先返回 (%.1fms), 价格: $%.2f",
-                    name, latency, price_data.price
+        pending = set(tasks)
+        try:
+            while pending and result is None:
+                done, pending = await asyncio.wait(
+                    pending, return_when=asyncio.FIRST_COMPLETED
                 )
-                break
-
-        # 取消剩余任务
-        for task in pending:
-            task.cancel()
-
-        # 如果第一个完成的失败了，等待剩余的
-        if not result and pending:
-            done2, _ = await asyncio.wait(pending, return_when=asyncio.ALL_COMPLETED)
-            for task in done2:
-                try:
-                    name, price_data, latency = task.result()
+                for task in done:
+                    try:
+                        name, price_data, latency = task.result()
+                    except asyncio.CancelledError:
+                        continue
                     if price_data:
                         result = price_data
-                        logger.info("并行采集备选: %s 返回价格: $%.2f", name, price_data.price)
+                        logger.info(
+                            "并行采集: %s 返回 (%.1fms), 价格: $%.2f",
+                            name, latency, price_data.price
+                        )
                         break
-                except asyncio.CancelledError:
-                    pass
+        finally:
+            # 取消尚未完成的任务并回收，避免悬挂任务告警
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
 
         return result
 
@@ -660,33 +656,28 @@ class AdvancedCollector:
         return gaps
 
     async def fill_gaps(self, hours: int = 24) -> int:
-        """补全数据间隙
-        
-        返回: 补全的数据点数
+        """检测到数据间隙后，采集一个当前样本以接续时间序列。
+
+        重要说明：本系统的数据源只提供"当前"现货价，**无法获取历史时刻的真实价格**，
+        因此真正的历史间隙回填是不可能的。早先的实现会对每个间隙各抓一次当前价并以
+        当前时间戳入库，结果是把几乎相同的当前价重复写入多次——既不能还原历史，
+        反而污染数据。现改为：检测间隙后只采集一个当前样本恢复序列连续性，
+        绝不伪造历史数据点。
+
+        返回: 实际新增的样本数（0 或 1）。
         """
         gaps = await self.detect_gaps(hours)
         if not gaps:
             return 0
 
-        filled = 0
-        for gap_start, gap_end in gaps:
-            logger.info(
-                "补全间隙: %s -> %s (%.1f 分钟)",
-                gap_start.isoformat(),
-                gap_end.isoformat(),
-                (gap_end - gap_start).total_seconds() / 60
-            )
-
-            # 尝试获取当前价格来填补
-            price_data = await self.fetch_once()
-            if price_data:
-                filled += 1
-                self._stats.gaps_filled += 1
-
-            # 避免过快请求
-            await asyncio.sleep(1)
-
-        return filled
+        logger.info(
+            "检测到 %d 处历史数据间隙；现货数据源无法回填历史价格，仅采集一个当前样本以接续序列",
+            len(gaps)
+        )
+        price_data = await self.fetch_once()
+        recorded = 1 if price_data else 0
+        self._stats.gaps_filled += recorded
+        return recorded
 
     # ============ 采集循环 ============
 
