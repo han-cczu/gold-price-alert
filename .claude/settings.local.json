@@ -10,7 +10,21 @@
       "Bash(PYTHONIOENCODING=utf-8 python:*)",
       "WebFetch(domain:hjyyds.com)",
       "Bash(dir:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(git remote *)",
+      "Bash(git push *)",
+      "Bash(python -m pytest -q -p no:cacheprovider)",
+      "Bash(git branch *)",
+      "Bash(gh auth *)",
+      "PowerShell(Get-Command *)",
+      "Bash(git checkout *)",
+      "Bash(git merge *)",
+      "Bash(git ls-remote *)",
+      "Bash(git fetch *)",
+      "Bash(set -e)",
+      "Bash(git rev-list *)",
+      "Bash(awk '{print \"  behind origin:\",$1,\" ahead of origin:\",$2}')",
+      "Bash(awk '{print \"behind:\",$1,\" ahead:\",$2}')"
     ]
   }
 }
