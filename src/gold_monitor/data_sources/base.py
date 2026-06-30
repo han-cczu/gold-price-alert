@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 @dataclass
 class PriceData:
     """金价数据结构"""
+
     price: float  # 价格 (USD/oz)
     currency: str = "USD"
     timestamp: datetime | None = None

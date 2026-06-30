@@ -18,17 +18,19 @@ logger = logging.getLogger(__name__)
 
 class AlertType(Enum):
     """告警类型"""
+
     THRESHOLD_UPPER = "threshold_upper"  # 突破上限
     THRESHOLD_LOWER = "threshold_lower"  # 跌破下限
-    VOLATILITY = "volatility"            # 波动告警
-    BREAKOUT_UP = "breakout_up"          # 向上突破
-    BREAKOUT_DOWN = "breakout_down"      # 向下突破
-    PULLBACK = "pullback"                # 回落
+    VOLATILITY = "volatility"  # 波动告警
+    BREAKOUT_UP = "breakout_up"  # 向上突破
+    BREAKOUT_DOWN = "breakout_down"  # 向下突破
+    PULLBACK = "pullback"  # 回落
 
 
 @dataclass
 class Alert:
     """告警信息"""
+
     alert_type: AlertType
     price: float
     message: str
@@ -53,14 +55,18 @@ class ConsoleNotification(NotificationChannel):
         from rich.panel import Panel
 
         console = Console(safe_box=True)
-        style = "red" if alert.alert_type in [AlertType.THRESHOLD_UPPER, AlertType.VOLATILITY] else "yellow"
+        style = (
+            "red"
+            if alert.alert_type in [AlertType.THRESHOLD_UPPER, AlertType.VOLATILITY]
+            else "yellow"
+        )
 
         panel = Panel(
             f"[bold]{alert.message}[/bold]\n\n"
             f"当前价格: ${alert.price:.2f}\n"
             f"时间: {alert.triggered_at.strftime('%Y-%m-%d %H:%M:%S')}",
             title=f"ALERT {alert.alert_type.value.upper()}",
-            border_style=style
+            border_style=style,
         )
         try:
             console.print(panel)
@@ -72,7 +78,14 @@ class ConsoleNotification(NotificationChannel):
 class EmailNotification(NotificationChannel):
     """邮件通知"""
 
-    def __init__(self, smtp_host: str, smtp_port: int, username: str, password: str, to_addrs: list[str]):
+    def __init__(
+        self,
+        smtp_host: str,
+        smtp_port: int,
+        username: str,
+        password: str,
+        to_addrs: list[str],
+    ):
         self.smtp_host = smtp_host
         self.smtp_port = smtp_port
         self.username = username
@@ -86,9 +99,9 @@ class EmailNotification(NotificationChannel):
 
         try:
             msg = MIMEMultipart()
-            msg['From'] = self.username
-            msg['To'] = ', '.join(self.to_addrs)
-            msg['Subject'] = f"金价告警: {alert.alert_type.value}"
+            msg["From"] = self.username
+            msg["To"] = ", ".join(self.to_addrs)
+            msg["Subject"] = f"金价告警: {alert.alert_type.value}"
 
             body = f"""
 金价告警通知
@@ -96,9 +109,9 @@ class EmailNotification(NotificationChannel):
 告警类型: {alert.alert_type.value}
 当前价格: ${alert.price:.2f}
 告警信息: {alert.message}
-触发时间: {alert.triggered_at.strftime('%Y-%m-%d %H:%M:%S')}
+触发时间: {alert.triggered_at.strftime("%Y-%m-%d %H:%M:%S")}
 """
-            msg.attach(MIMEText(body, 'plain', 'utf-8'))
+            msg.attach(MIMEText(body, "plain", "utf-8"))
 
             with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
                 server.starttls()
@@ -128,21 +141,21 @@ class WebhookNotification(NotificationChannel):
                     "msgtype": "text",
                     "text": {
                         "content": f"金价告警\n类型: {alert.alert_type.value}\n价格: ${alert.price:.2f}\n{alert.message}"
-                    }
+                    },
                 }
             elif self.webhook_type == "wechat":
                 payload = {
                     "msgtype": "text",
                     "text": {
                         "content": f"金价告警\n类型: {alert.alert_type.value}\n价格: ${alert.price:.2f}\n{alert.message}"
-                    }
+                    },
                 }
             else:
                 payload = {
                     "alert_type": alert.alert_type.value,
                     "price": alert.price,
                     "message": alert.message,
-                    "triggered_at": alert.triggered_at.isoformat()
+                    "triggered_at": alert.triggered_at.isoformat(),
                 }
 
             async with aiohttp.ClientSession() as session:
@@ -164,7 +177,9 @@ class TelegramNotification(NotificationChannel):
         import aiohttp
 
         try:
-            direction = "🔴" if alert.alert_type in [AlertType.THRESHOLD_LOWER] else "🟡"
+            direction = (
+                "🔴" if alert.alert_type in [AlertType.THRESHOLD_LOWER] else "🟡"
+            )
             if alert.alert_type == AlertType.THRESHOLD_UPPER:
                 direction = "🔴"
             elif alert.alert_type == AlertType.VOLATILITY:
@@ -179,11 +194,7 @@ class TelegramNotification(NotificationChannel):
             )
 
             url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
-            payload = {
-                "chat_id": self.chat_id,
-                "text": text,
-                "parse_mode": "Markdown"
-            }
+            payload = {"chat_id": self.chat_id, "text": text, "parse_mode": "Markdown"}
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload) as resp:
@@ -195,14 +206,16 @@ class TelegramNotification(NotificationChannel):
 
 # ============ 波动检测器 ============
 
+
 @dataclass
 class VolatilityResult:
     """波动分析结果"""
-    change_percent: float           # 首尾涨跌幅
-    amplitude_percent: float        # 振幅 (high-low)/base
-    rolling_std: float              # 滚动标准差
-    consecutive_trend: int          # 连续同向次数
-    event_type: str                 # breakout_up/breakout_down/pullback/normal
+
+    change_percent: float  # 首尾涨跌幅
+    amplitude_percent: float  # 振幅 (high-low)/base
+    rolling_std: float  # 滚动标准差
+    consecutive_trend: int  # 连续同向次数
+    event_type: str  # breakout_up/breakout_down/pullback/normal
 
 
 class VolatilityDetector:
@@ -212,13 +225,15 @@ class VolatilityDetector:
         self,
         threshold_percent: float = 1.0,
         min_consecutive: int = 3,
-        max_amplitude: float = 5.0
+        max_amplitude: float = 5.0,
     ):
         self._threshold = threshold_percent
         self._min_consecutive = min_consecutive
         self._max_amplitude = max_amplitude
 
-    def analyze(self, prices: list[tuple[datetime, float]]) -> Optional[VolatilityResult]:
+    def analyze(
+        self, prices: list[tuple[datetime, float]]
+    ) -> Optional[VolatilityResult]:
         """分析价格序列，返回波动结果"""
         if len(prices) < 2:
             return None
@@ -254,7 +269,7 @@ class VolatilityDetector:
             amplitude_percent=amplitude_percent,
             rolling_std=rolling_std,
             consecutive_trend=consecutive_trend,
-            event_type=event_type
+            event_type=event_type,
         )
 
     def _calc_consecutive_trend(self, prices: list[float]) -> int:
@@ -290,9 +305,15 @@ class VolatilityDetector:
 
         # 检测是否为突破（最后几个价格连续创新高/新低）
         recent = prices[-3:]
-        if all(recent[i] > recent[i - 1] for i in range(1, len(recent))) and change_percent > 0:
+        if (
+            all(recent[i] > recent[i - 1] for i in range(1, len(recent)))
+            and change_percent > 0
+        ):
             return "breakout_up"
-        if all(recent[i] < recent[i - 1] for i in range(1, len(recent))) and change_percent < 0:
+        if (
+            all(recent[i] < recent[i - 1] for i in range(1, len(recent)))
+            and change_percent < 0
+        ):
             return "breakout_down"
 
         # 检测回落（先涨后跌或先跌后涨）
@@ -301,13 +322,27 @@ class VolatilityDetector:
         second_half = prices[mid_idx:]
 
         if first_half and second_half:
-            first_trend = sum(1 for i in range(1, len(first_half)) if first_half[i] > first_half[i - 1])
-            second_trend = sum(1 for i in range(1, len(second_half)) if second_half[i] > second_half[i - 1])
+            first_trend = sum(
+                1
+                for i in range(1, len(first_half))
+                if first_half[i] > first_half[i - 1]
+            )
+            second_trend = sum(
+                1
+                for i in range(1, len(second_half))
+                if second_half[i] > second_half[i - 1]
+            )
 
             # 前半段涨、后半段跌，或者反过来
-            if first_trend > len(first_half) // 2 and second_trend < len(second_half) // 2:
+            if (
+                first_trend > len(first_half) // 2
+                and second_trend < len(second_half) // 2
+            ):
                 return "pullback"
-            if first_trend < len(first_half) // 2 and second_trend > len(second_half) // 2:
+            if (
+                first_trend < len(first_half) // 2
+                and second_trend > len(second_half) // 2
+            ):
                 return "pullback"
 
         return "normal"
@@ -334,10 +369,13 @@ class VolatilityDetector:
 
 # ============ 通知管理器 ============
 
+
 class NotificationManager:
     """通知管理器 - 统一管理所有渠道，支持重试"""
 
-    def __init__(self, database: Database, channels: list[NotificationChannel] | None = None):
+    def __init__(
+        self, database: Database, channels: list[NotificationChannel] | None = None
+    ):
         self._db = database
         self._channels = channels or []
         self._max_retries = 3
@@ -350,9 +388,11 @@ class NotificationManager:
         """添加通知渠道"""
         self._channels.append(channel)
 
-    async def send_with_retry(self, alert: Alert, alert_record_id: int | None = None) -> dict[str, bool]:
+    async def send_with_retry(
+        self, alert: Alert, alert_record_id: int | None = None
+    ) -> dict[str, bool]:
         """发送通知到所有渠道，支持重试
-        
+
         返回: {channel_name: success}
         """
         results = {}
@@ -372,12 +412,15 @@ class NotificationManager:
                     last_error = str(e)
                     logger.warning(
                         "通知发送失败 (渠道: %s, 尝试: %d/%d): %s",
-                        channel_name, attempt + 1, self._max_retries, e
+                        channel_name,
+                        attempt + 1,
+                        self._max_retries,
+                        e,
                     )
 
                 if not success and attempt < self._max_retries - 1:
                     # 指数退避
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(2**attempt)
 
             # 记录发送结果
             self._db.save_notification_log(
@@ -385,13 +428,15 @@ class NotificationManager:
                 status="success" if success else "failed",
                 alert_id=alert_record_id,
                 error_message=last_error if not success else None,
-                retry_count=attempt if not success else 0
+                retry_count=attempt if not success else 0,
             )
 
             results[channel_name] = success
             logger.info(
                 "通知发送 %s (渠道: %s, 告警: %s)",
-                "成功" if success else "失败", channel_name, alert.alert_type.value
+                "成功" if success else "失败",
+                channel_name,
+                alert.alert_type.value,
             )
 
         return results
@@ -409,13 +454,15 @@ class AlertMonitor:
         volatility_percent: float | None = None,
         volatility_window_minutes: int = 5,
         use_smart_volatility: bool = True,
-        persist_interval: int = 60  # 状态持久化间隔（秒）
+        persist_interval: int = 60,  # 状态持久化间隔（秒）
     ):
         self._db = database
         self._channels = channels or [ConsoleNotification()]
         self._threshold_upper = threshold_upper or settings.alert_price_upper
         self._threshold_lower = threshold_lower or settings.alert_price_lower
-        self._volatility_percent = volatility_percent or settings.alert_threshold_percent
+        self._volatility_percent = (
+            volatility_percent or settings.alert_threshold_percent
+        )
         self._volatility_window = volatility_window_minutes
         self._use_smart_volatility = use_smart_volatility
         self._persist_interval = persist_interval
@@ -431,7 +478,7 @@ class AlertMonitor:
         self._volatility_detector = VolatilityDetector(
             threshold_percent=self._volatility_percent,
             min_consecutive=3,
-            max_amplitude=5.0
+            max_amplitude=5.0,
         )
 
         # 通知管理器
@@ -441,7 +488,9 @@ class AlertMonitor:
         self._pending_notifications: set[asyncio.Task] = set()
 
         # 状态持久化控制
-        self._last_persist_time: datetime = datetime.now(timezone.utc).replace(tzinfo=None)
+        self._last_persist_time: datetime = datetime.now(timezone.utc).replace(
+            tzinfo=None
+        )
         self._state_dirty = False
 
         # 启动时恢复状态
@@ -458,7 +507,10 @@ class AlertMonitor:
                         self._last_alerts[alert_type] = state.last_triggered_at
 
                     # 恢复价格历史（仅用于波动检测）
-                    if state.alert_type == AlertType.VOLATILITY.value and state.window_prices:
+                    if (
+                        state.alert_type == AlertType.VOLATILITY.value
+                        and state.window_prices
+                    ):
                         restored_prices = state.get_window_prices()
                         if restored_prices:
                             self._price_history = restored_prices
@@ -478,24 +530,29 @@ class AlertMonitor:
         # 检查是否需要持久化
         if not force and not self._state_dirty:
             return
-        if not force and (now - self._last_persist_time).total_seconds() < self._persist_interval:
+        if (
+            not force
+            and (now - self._last_persist_time).total_seconds() < self._persist_interval
+        ):
             return
 
         try:
             # 持久化各告警类型的状态
             for alert_type, last_triggered in self._last_alerts.items():
-                cooldown_until = last_triggered + self._alert_cooldown if last_triggered else None
+                cooldown_until = (
+                    last_triggered + self._alert_cooldown if last_triggered else None
+                )
                 self._db.save_alert_state(
                     alert_type=alert_type.value,
                     last_triggered_at=last_triggered,
-                    cooldown_until=cooldown_until
+                    cooldown_until=cooldown_until,
                 )
 
             # 持久化价格历史（用于波动检测）
             if self._price_history:
                 self._db.save_alert_state(
                     alert_type=AlertType.VOLATILITY.value,
-                    window_prices=self._price_history
+                    window_prices=self._price_history,
                 )
 
             self._last_persist_time = now
@@ -507,7 +564,11 @@ class AlertMonitor:
     def _should_alert(self, alert_type: AlertType) -> bool:
         """检查是否应该发送告警（避免重复）"""
         last_time = self._last_alerts.get(alert_type)
-        if last_time and datetime.now(timezone.utc).replace(tzinfo=None) - last_time < self._alert_cooldown:
+        if (
+            last_time
+            and datetime.now(timezone.utc).replace(tzinfo=None) - last_time
+            < self._alert_cooldown
+        ):
             return False
         return True
 
@@ -523,7 +584,7 @@ class AlertMonitor:
         self._db.save_alert_state(
             alert_type=alert.alert_type.value,
             last_triggered_at=alert.triggered_at,
-            cooldown_until=alert.triggered_at + self._alert_cooldown
+            cooldown_until=alert.triggered_at + self._alert_cooldown,
         )
 
         return int(record.id)
@@ -580,23 +641,27 @@ class AlertMonitor:
         self._update_price_history(price, now)
 
         # 检查上限告警
-        if price >= self._threshold_upper and self._should_alert(AlertType.THRESHOLD_UPPER):
+        if price >= self._threshold_upper and self._should_alert(
+            AlertType.THRESHOLD_UPPER
+        ):
             alert = Alert(
                 alert_type=AlertType.THRESHOLD_UPPER,
                 price=price,
                 message=f"金价突破上限 ${self._threshold_upper:.2f}",
-                triggered_at=now
+                triggered_at=now,
             )
             alerts.append(alert)
             alert_ids.append(self._record_alert(alert))
 
         # 检查下限告警
-        if price <= self._threshold_lower and self._should_alert(AlertType.THRESHOLD_LOWER):
+        if price <= self._threshold_lower and self._should_alert(
+            AlertType.THRESHOLD_LOWER
+        ):
             alert = Alert(
                 alert_type=AlertType.THRESHOLD_LOWER,
                 price=price,
                 message=f"金价跌破下限 ${self._threshold_lower:.2f}",
-                triggered_at=now
+                triggered_at=now,
             )
             alerts.append(alert)
             alert_ids.append(self._record_alert(alert))
@@ -628,7 +693,7 @@ class AlertMonitor:
                         price=price,
                         message=message,
                         triggered_at=now,
-                        change_percent=result.change_percent
+                        change_percent=result.change_percent,
                     )
                     alerts.append(alert)
                     alert_ids.append(self._record_alert(alert))
@@ -637,14 +702,18 @@ class AlertMonitor:
             volatility = self._calculate_volatility()
             if volatility:
                 change_percent, base_price = volatility
-                if abs(change_percent) >= self._volatility_percent and self._should_alert(AlertType.VOLATILITY):
+                if abs(
+                    change_percent
+                ) >= self._volatility_percent and self._should_alert(
+                    AlertType.VOLATILITY
+                ):
                     direction = "上涨" if change_percent > 0 else "下跌"
                     alert = Alert(
                         alert_type=AlertType.VOLATILITY,
                         price=price,
                         message=f"金价{self._volatility_window}分钟内{direction} {abs(change_percent):.2f}%",
                         triggered_at=now,
-                        change_percent=change_percent
+                        change_percent=change_percent,
                     )
                     alerts.append(alert)
                     alert_ids.append(self._record_alert(alert))
@@ -662,11 +731,17 @@ class AlertMonitor:
         """获取告警历史"""
         with self._db.get_session() as session:
             from .models import AlertRecord
-            return session.query(AlertRecord).order_by(
-                AlertRecord.triggered_at.desc()
-            ).limit(limit).all()
 
-    def get_notification_logs(self, limit: int = 100, channel: str | None = None) -> list:
+            return (
+                session.query(AlertRecord)
+                .order_by(AlertRecord.triggered_at.desc())
+                .limit(limit)
+                .all()
+            )
+
+    def get_notification_logs(
+        self, limit: int = 100, channel: str | None = None
+    ) -> list:
         """获取通知发送日志"""
         return self._db.get_notification_logs(limit=limit, channel=channel)
 

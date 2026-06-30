@@ -7,9 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from ..analyzer import GoldAnalyzer
 from ..config import settings
-from ..schemas import (
-    AnalysisResponse, SmartAnalysisResponse, RefreshAnalysisRequest
-)
+from ..schemas import AnalysisResponse, SmartAnalysisResponse, RefreshAnalysisRequest
 from ..state import db, get_smart_analysis_cache, _run_smart_analysis
 
 router = APIRouter()
@@ -47,7 +45,7 @@ async def run_analysis():
         current_price=current_price,
         price_change=price_change,
         recent_prices=recent_prices,
-        time_window_minutes=time_window_minutes
+        time_window_minutes=time_window_minutes,
     )
 
     return AnalysisResponse(
@@ -55,7 +53,7 @@ async def run_analysis():
         possible_reasons=report.possible_reasons,
         market_sentiment=report.market_sentiment,
         recommendation=report.recommendation,
-        generated_at=report.generated_at
+        generated_at=report.generated_at,
     )
 
 
@@ -66,22 +64,18 @@ async def get_smart_analysis():
 
     if cache:
         # 计算缓存年龄
-        cache_age = datetime.now(timezone.utc).replace(tzinfo=None) - cache["generated_at"]
+        cache_age = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - cache["generated_at"]
+        )
         cache_age_minutes = int(cache_age.total_seconds() / 60)
 
         return SmartAnalysisResponse(
-            **cache,
-            is_cached=True,
-            cache_age_minutes=cache_age_minutes
+            **cache, is_cached=True, cache_age_minutes=cache_age_minutes
         )
 
     # 没有缓存，执行分析
     result = await _run_smart_analysis()
-    return SmartAnalysisResponse(
-        **result,
-        is_cached=False,
-        cache_age_minutes=0
-    )
+    return SmartAnalysisResponse(**result, is_cached=False, cache_age_minutes=0)
 
 
 @router.post("/api/smart-analysis/refresh")
@@ -93,7 +87,7 @@ async def refresh_smart_analysis(request: Optional[RefreshAnalysisRequest] = Non
         return {
             "success": True,
             "message": "分析已刷新",
-            "data": result  # 包含完整数据，包括 raw_response
+            "data": result,  # 包含完整数据，包括 raw_response
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}")
@@ -102,7 +96,9 @@ async def refresh_smart_analysis(request: Optional[RefreshAnalysisRequest] = Non
 @router.get("/api/analysis/history")
 async def get_analysis_history(
     limit: int = Query(default=50, le=200),
-    analysis_type: Optional[str] = Query(default=None, description="分析类型: volatility, smart")
+    analysis_type: Optional[str] = Query(
+        default=None, description="分析类型: volatility, smart"
+    ),
 ):
     """获取分析历史记录"""
     records = db.get_analysis_records(limit=limit, analysis_type=analysis_type)
@@ -113,15 +109,19 @@ async def get_analysis_history(
                 "analysis_type": r.analysis_type,
                 "model_provider": r.model_provider,
                 "model_name": r.model_name,
-                "price_range_start": r.price_range_start.isoformat() if r.price_range_start else None,
-                "price_range_end": r.price_range_end.isoformat() if r.price_range_end else None,
+                "price_range_start": r.price_range_start.isoformat()
+                if r.price_range_start
+                else None,
+                "price_range_end": r.price_range_end.isoformat()
+                if r.price_range_end
+                else None,
                 "input_summary": r.input_summary,
                 "result": r.get_result(),
-                "created_at": r.created_at.isoformat() if r.created_at else None
+                "created_at": r.created_at.isoformat() if r.created_at else None,
             }
             for r in records
         ],
-        "count": len(records)
+        "count": len(records),
     }
 
 
@@ -130,7 +130,10 @@ async def get_analysis_record(record_id: int):
     """获取单条分析记录详情"""
     with db.get_session() as session:
         from ..models import AnalysisRecord
-        record = session.query(AnalysisRecord).filter(AnalysisRecord.id == record_id).first()
+
+        record = (
+            session.query(AnalysisRecord).filter(AnalysisRecord.id == record_id).first()
+        )
         if not record:
             raise HTTPException(status_code=404, detail="记录不存在")
         return {
@@ -138,9 +141,13 @@ async def get_analysis_record(record_id: int):
             "analysis_type": record.analysis_type,
             "model_provider": record.model_provider,
             "model_name": record.model_name,
-            "price_range_start": record.price_range_start.isoformat() if record.price_range_start else None,
-            "price_range_end": record.price_range_end.isoformat() if record.price_range_end else None,
+            "price_range_start": record.price_range_start.isoformat()
+            if record.price_range_start
+            else None,
+            "price_range_end": record.price_range_end.isoformat()
+            if record.price_range_end
+            else None,
             "input_summary": record.input_summary,
             "result": record.get_result(),
-            "created_at": record.created_at.isoformat() if record.created_at else None
+            "created_at": record.created_at.isoformat() if record.created_at else None,
         }

@@ -27,12 +27,12 @@ from .collector import AdvancedCollector, FetchStrategy, get_collector, set_coll
 from .alert import AlertMonitor
 from .security import is_admin_path, is_rate_limited_path
 from .data_lifecycle import (
-    DataLifecycleManager, set_lifecycle_manager,
-    start_cleanup_scheduler, stop_cleanup_scheduler
+    DataLifecycleManager,
+    set_lifecycle_manager,
+    start_cleanup_scheduler,
+    stop_cleanup_scheduler,
 )
-from .metrics import (
-    set_system_info, MetricsMiddleware, PROMETHEUS_AVAILABLE
-)
+from .metrics import set_system_info, MetricsMiddleware, PROMETHEUS_AVAILABLE
 from . import routers
 from .state import (
     db,
@@ -51,7 +51,9 @@ from .state import (
 logger = logging.getLogger(__name__)
 
 # 首页 HTML（已抽离到 static/index.html，模块加载时读入一次）
-_INDEX_HTML = (Path(__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
+_INDEX_HTML = (Path(__file__).parent / "static" / "index.html").read_text(
+    encoding="utf-8"
+)
 
 # 重新导出 db，保持 `from gold_monitor.web import app, db` 向后兼容
 __all__ = ["app", "db", "run_server"]
@@ -71,7 +73,7 @@ async def lifespan(app: FastAPI):
         volatility_percent=settings.alert_threshold_percent,
         volatility_window_minutes=settings.alert_volatility_window,
         use_smart_volatility=True,  # 使用抗噪波动检测
-        persist_interval=60  # 每60秒持久化状态
+        persist_interval=60,  # 每60秒持久化状态
     )
     set_alert_monitor(alert_monitor)
 
@@ -91,7 +93,7 @@ async def lifespan(app: FastAPI):
         deduplicate=True,
         dedupe_threshold=0.01,
         gap_detection=True,
-        gap_threshold_minutes=5
+        gap_threshold_minutes=5,
     )
     set_collector(collector)
     collector.start(settings.fetch_interval)
@@ -109,7 +111,7 @@ async def lifespan(app: FastAPI):
         set_system_info(
             version=__version__,
             data_source=settings.data_source,
-            fetch_interval=settings.fetch_interval
+            fetch_interval=settings.fetch_interval,
         )
         logger.info("Prometheus 指标已启用")
 
@@ -154,7 +156,7 @@ app = FastAPI(
     title="金价实时监控系统",
     description="实时获取金价、告警通知、AI 分析",
     version=__version__,
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # CORS 配置
@@ -177,6 +179,7 @@ if PROMETHEUS_AVAILABLE:
 
 # ============ 安全中间件 ============
 
+
 @app.middleware("http")
 async def security_middleware(request: Request, call_next):
     """安全中间件 - API鉴权和限流"""
@@ -191,7 +194,7 @@ async def security_middleware(request: Request, call_next):
                 content='{"detail": "请求过于频繁，请稍后再试"}',
                 status_code=429,
                 media_type="application/json",
-                headers={"Retry-After": "60", "X-RateLimit-Remaining": "0"}
+                headers={"Retry-After": "60", "X-RateLimit-Remaining": "0"},
             )
 
     # 管理员权限检查（仅对管理路径且启用鉴权时）
@@ -202,7 +205,7 @@ async def security_middleware(request: Request, call_next):
                 content='{"detail": "需要管理员权限，请提供有效的 X-Admin-Key 头"}',
                 status_code=401,
                 media_type="application/json",
-                headers={"WWW-Authenticate": "API-Key"}
+                headers={"WWW-Authenticate": "API-Key"},
             )
 
     response = await call_next(request)
@@ -210,6 +213,7 @@ async def security_middleware(request: Request, call_next):
 
 
 # ============ 首页 ============
+
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -234,4 +238,5 @@ app.include_router(routers.source_quality.router)
 def run_server(host: str = "0.0.0.0", port: int = 8000):
     """启动 Web 服务"""
     import uvicorn
+
     uvicorn.run(app, host=host, port=port)

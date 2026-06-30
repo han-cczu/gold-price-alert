@@ -9,6 +9,7 @@ from .models import Database, GoldPrice, AlertRecord
 def get_app():
     """获取 FastAPI 应用实例"""
     from .web import app
+
     return app
 
 

@@ -19,8 +19,7 @@ def _parse_iso_datetime(value: Optional[str], field_name: str) -> Optional[datet
         return datetime.fromisoformat(value)
     except ValueError as exc:
         raise HTTPException(
-            status_code=400,
-            detail=f"{field_name} 必须是有效的 ISO 时间格式"
+            status_code=400, detail=f"{field_name} 必须是有效的 ISO 时间格式"
         ) from exc
 
 
@@ -38,7 +37,7 @@ async def export_data(
     format: str = Query(default="json", description="导出格式: json, csv"),
     start: Optional[str] = Query(default=None, description="起始时间 (ISO格式)"),
     end: Optional[str] = Query(default=None, description="结束时间 (ISO格式)"),
-    limit: int = Query(default=1000, le=10000, description="最大记录数")
+    limit: int = Query(default=1000, le=10000, description="最大记录数"),
 ):
     """导出价格数据"""
     manager = get_lifecycle_manager(db)
@@ -53,14 +52,14 @@ async def export_data(
         return Response(
             content=content,
             media_type="text/csv",
-            headers={"Content-Disposition": "attachment; filename=gold_prices.csv"}
+            headers={"Content-Disposition": "attachment; filename=gold_prices.csv"},
         )
     else:
         content = await manager.export_json(start=start_dt, end=end_dt, limit=limit)
         return Response(
             content=content,
             media_type="application/json",
-            headers={"Content-Disposition": "attachment; filename=gold_prices.json"}
+            headers={"Content-Disposition": "attachment; filename=gold_prices.json"},
         )
 
 
@@ -76,7 +75,9 @@ async def cleanup_data(_admin: bool = Depends(require_admin_dep)):
 
 
 @router.post("/api/data/backup")
-async def backup_data(backup_name: Optional[str] = None, _admin: bool = Depends(require_admin_dep)):
+async def backup_data(
+    backup_name: Optional[str] = None, _admin: bool = Depends(require_admin_dep)
+):
     """创建数据库备份（需要管理员权限）"""
     manager = get_lifecycle_manager(db)
     if not manager:

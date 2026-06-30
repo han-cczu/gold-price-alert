@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 # ============ 工具函数 ============
 
+
 def utcnow() -> datetime:
     """获取当前 UTC 时间（兼容新旧 Python）"""
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -81,19 +82,23 @@ def create_all_sources() -> list[BaseDataSource]:
 
 # ============ 采集策略 ============
 
+
 class FetchStrategy(Enum):
     """采集策略"""
-    SINGLE = "single"           # 单数据源
-    FALLBACK = "fallback"       # 顺序降级
-    PARALLEL_FIRST = "parallel_first"   # 并行取最快
-    PARALLEL_VOTE = "parallel_vote"     # 并行投票（取中位数）
+
+    SINGLE = "single"  # 单数据源
+    FALLBACK = "fallback"  # 顺序降级
+    PARALLEL_FIRST = "parallel_first"  # 并行取最快
+    PARALLEL_VOTE = "parallel_vote"  # 并行投票（取中位数）
 
 
 # ============ 统计信息 ============
 
+
 @dataclass
 class SourceStats:
     """单个数据源统计"""
+
     name: str
     total_fetches: int = 0
     success_count: int = 0
@@ -124,21 +129,24 @@ class SourceStats:
             "success_rate": round(self.success_rate, 2),
             "avg_latency_ms": round(self.avg_latency_ms, 2),
             "last_latency_ms": round(self.last_latency_ms, 2),
-            "last_success_at": self.last_success_at.isoformat() if self.last_success_at else None,
-            "last_error": self.last_error
+            "last_success_at": self.last_success_at.isoformat()
+            if self.last_success_at
+            else None,
+            "last_error": self.last_error,
         }
 
 
 @dataclass
 class SourceQuality:
     """数据源质量评分"""
+
     name: str
     reliability_score: float  # 可靠性评分 (0-100)
-    freshness_score: float    # 数据新鲜度 (0-100)
-    latency_score: float      # 延迟评分 (0-100)
-    overall_score: float      # 综合评分 (0-100)
-    weight: float             # 融合权重 (0-1)
-    status: str               # healthy/degraded/unhealthy
+    freshness_score: float  # 数据新鲜度 (0-100)
+    latency_score: float  # 延迟评分 (0-100)
+    overall_score: float  # 综合评分 (0-100)
+    weight: float  # 融合权重 (0-1)
+    status: str  # healthy/degraded/unhealthy
 
     def to_dict(self) -> dict:
         return {
@@ -148,7 +156,7 @@ class SourceQuality:
             "latency_score": round(self.latency_score, 1),
             "overall_score": round(self.overall_score, 1),
             "weight": round(self.weight, 3),
-            "status": self.status
+            "status": self.status,
         }
 
 
@@ -173,9 +181,7 @@ def calculate_source_quality(stats: SourceStats) -> SourceQuality:
 
     # 综合评分（加权平均）
     overall_score = (
-        reliability_score * 0.5 +
-        freshness_score * 0.3 +
-        latency_score * 0.2
+        reliability_score * 0.5 + freshness_score * 0.3 + latency_score * 0.2
     )
 
     # 计算融合权重
@@ -196,13 +202,14 @@ def calculate_source_quality(stats: SourceStats) -> SourceQuality:
         latency_score=latency_score,
         overall_score=overall_score,
         weight=weight,
-        status=status
+        status=status,
     )
 
 
 @dataclass
 class CollectorStats:
     """采集器统计信息"""
+
     started_at: datetime = field(default_factory=utcnow)
     total_fetches: int = 0
     success_count: int = 0
@@ -234,20 +241,25 @@ class CollectorStats:
             "failure_count": self.failure_count,
             "success_rate": round(self.success_rate, 2),
             "consecutive_failures": self.consecutive_failures,
-            "last_success_at": self.last_success_at.isoformat() if self.last_success_at else None,
-            "last_failure_at": self.last_failure_at.isoformat() if self.last_failure_at else None,
+            "last_success_at": self.last_success_at.isoformat()
+            if self.last_success_at
+            else None,
+            "last_failure_at": self.last_failure_at.isoformat()
+            if self.last_failure_at
+            else None,
             "last_error": self.last_error,
             "gaps_detected": self.gaps_detected,
             "gaps_filled": self.gaps_filled,
-            "source_stats": {k: v.to_dict() for k, v in self.source_stats.items()}
+            "source_stats": {k: v.to_dict() for k, v in self.source_stats.items()},
         }
 
 
 # ============ 高级采集器 ============
 
+
 class AdvancedCollector:
     """高级金价采集器
-    
+
     特性：
     1. 多数据源并行采集 - 同时从多个源获取，取最快/最可靠的
     2. 历史数据补全 - 检测数据间隙并自动补采
@@ -262,7 +274,7 @@ class AdvancedCollector:
         deduplicate: bool = True,
         dedupe_threshold: float = 0.01,
         gap_detection: bool = True,
-        gap_threshold_minutes: int = 5  # 超过此间隔视为数据间隙
+        gap_threshold_minutes: int = 5,  # 超过此间隔视为数据间隙
     ):
         self._db = database
         self._strategy = strategy
@@ -319,7 +331,7 @@ class AdvancedCollector:
         """运行时修改采集间隔"""
         if seconds < 1:
             raise ValueError("采集间隔不能小于 1 秒")
-        
+
         old_interval = self._interval
         self._interval = seconds
         self._interval_changed.set()
@@ -340,7 +352,7 @@ class AdvancedCollector:
             "dedupe_threshold": self._dedupe_threshold,
             "gap_detection": self._gap_detection,
             "gap_threshold_minutes": self._gap_threshold.total_seconds() / 60,
-            "sources": [s.name for s in self._sources] if self._sources else []
+            "sources": [s.name for s in self._sources] if self._sources else [],
         }
 
     def get_source_quality(self) -> list[SourceQuality]:
@@ -349,7 +361,7 @@ class AdvancedCollector:
         for name, stats in self._stats.source_stats.items():
             quality = calculate_source_quality(stats)
             qualities.append(quality)
-        
+
         # 按综合评分排序
         qualities.sort(key=lambda q: q.overall_score, reverse=True)
         return qualities
@@ -358,21 +370,19 @@ class AdvancedCollector:
         """获取整体数据置信度"""
         qualities = self.get_source_quality()
         if not qualities:
-            return {
-                "confidence": 0,
-                "status": "unknown",
-                "message": "无数据源"
-            }
+            return {"confidence": 0, "status": "unknown", "message": "无数据源"}
 
         # 使用最佳数据源的评分作为置信度
         best = qualities[0]
-        
+
         # 计算加权平均置信度（如果有多个健康数据源）
         healthy_sources = [q for q in qualities if q.status == "healthy"]
         if len(healthy_sources) > 1:
             weighted_sum = sum(q.overall_score * q.weight for q in healthy_sources)
             total_weight = sum(q.weight for q in healthy_sources)
-            confidence = weighted_sum / total_weight if total_weight > 0 else best.overall_score
+            confidence = (
+                weighted_sum / total_weight if total_weight > 0 else best.overall_score
+            )
         else:
             confidence = best.overall_score
 
@@ -396,7 +406,7 @@ class AdvancedCollector:
             "message": message,
             "best_source": best.name,
             "healthy_sources": len(healthy_sources),
-            "total_sources": len(qualities)
+            "total_sources": len(qualities),
         }
 
     # ============ 数据源管理 ============
@@ -407,7 +417,10 @@ class AdvancedCollector:
             if self._sources:
                 return
 
-            if self._strategy in (FetchStrategy.PARALLEL_FIRST, FetchStrategy.PARALLEL_VOTE):
+            if self._strategy in (
+                FetchStrategy.PARALLEL_FIRST,
+                FetchStrategy.PARALLEL_VOTE,
+            ):
                 self._sources = create_all_sources()
             elif self._strategy == FetchStrategy.FALLBACK:
                 self._sources = [create_fallback_source()]
@@ -421,14 +434,14 @@ class AdvancedCollector:
             logger.info(
                 "初始化 %d 个数据源: %s",
                 len(self._sources),
-                [s.name for s in self._sources]
+                [s.name for s in self._sources],
             )
 
     async def _close_sources(self):
         """关闭所有数据源"""
         async with self._source_lock:
             for source in self._sources:
-                if hasattr(source, 'close'):
+                if hasattr(source, "close"):
                     try:
                         await source.close()
                     except Exception as e:
@@ -437,7 +450,9 @@ class AdvancedCollector:
 
     # ============ 并行采集 ============
 
-    async def _fetch_from_source(self, source: BaseDataSource) -> tuple[str, Optional[PriceData], float]:
+    async def _fetch_from_source(
+        self, source: BaseDataSource
+    ) -> tuple[str, Optional[PriceData], float]:
         """从单个数据源获取价格，返回 (源名称, 价格数据, 延迟ms)"""
         source_stats = self._stats.source_stats.get(source.name)
         if source_stats:
@@ -448,7 +463,7 @@ class AdvancedCollector:
         try:
             price_data = await asyncio.wait_for(
                 source.fetch_price(),
-                timeout=10.0  # 10秒超时
+                timeout=10.0,  # 10秒超时
             )
             latency = (asyncio.get_event_loop().time() - start_time) * 1000
 
@@ -502,7 +517,9 @@ class AdvancedCollector:
                         result = price_data
                         logger.info(
                             "并行采集: %s 返回 (%.1fms), 价格: $%.2f",
-                            name, latency, price_data.price
+                            name,
+                            latency,
+                            price_data.price,
                         )
                         break
         finally:
@@ -545,7 +562,9 @@ class AdvancedCollector:
 
         logger.info(
             "投票采集: %d/%d 成功, 中位数价格: $%.2f",
-            len(prices), len(self._sources), median_price_data.price
+            len(prices),
+            len(self._sources),
+            median_price_data.price,
         )
 
         return median_price_data
@@ -581,7 +600,9 @@ class AdvancedCollector:
                 self._db.save_price(price_data.price, price_data.source)
                 logger.info(
                     "采集金价: $%.2f (来源: %s, 策略: %s)",
-                    price_data.price, price_data.source, self._strategy.value
+                    price_data.price,
+                    price_data.source,
+                    self._strategy.value,
                 )
             else:
                 logger.debug("价格无变化，跳过保存: $%.2f", price_data.price)
@@ -606,8 +627,7 @@ class AdvancedCollector:
             self._stats.last_error = str(e)
 
             logger.error(
-                "数据采集失败 (%d 次连续失败): %s",
-                self._stats.consecutive_failures, e
+                "数据采集失败 (%d 次连续失败): %s", self._stats.consecutive_failures, e
             )
 
             return None
@@ -627,7 +647,7 @@ class AdvancedCollector:
 
     async def detect_gaps(self, hours: int = 24) -> list[tuple[datetime, datetime]]:
         """检测数据间隙
-        
+
         返回: [(间隙开始时间, 间隙结束时间), ...]
         """
         if not self._gap_detection:
@@ -675,7 +695,7 @@ class AdvancedCollector:
 
         logger.info(
             "检测到 %d 处历史数据间隙；现货数据源无法回填历史价格，仅采集一个当前样本以接续序列",
-            len(gaps)
+            len(gaps),
         )
         price_data = await self.fetch_once()
         recorded = 1 if price_data else 0
@@ -688,7 +708,10 @@ class AdvancedCollector:
         """主采集循环"""
         logger.info(
             "数据采集启动 (间隔: %d秒, 策略: %s, 去重: %s, 间隙检测: %s)",
-            self._interval, self._strategy.value, self._deduplicate, self._gap_detection
+            self._interval,
+            self._strategy.value,
+            self._deduplicate,
+            self._gap_detection,
         )
 
         # 启动时立即采集一次
@@ -702,8 +725,8 @@ class AdvancedCollector:
             # 计算等待时间
             if self._stats.consecutive_failures > 0:
                 wait_time = min(
-                    self._backoff_base ** self._stats.consecutive_failures,
-                    self._backoff_max
+                    self._backoff_base**self._stats.consecutive_failures,
+                    self._backoff_max,
                 )
                 logger.info("等待 %.1f 秒后重试...", wait_time)
             else:
@@ -711,10 +734,7 @@ class AdvancedCollector:
 
             # 等待，但响应间隔修改
             try:
-                await asyncio.wait_for(
-                    self._interval_changed.wait(),
-                    timeout=wait_time
-                )
+                await asyncio.wait_for(self._interval_changed.wait(), timeout=wait_time)
                 self._interval_changed.clear()
                 logger.debug("检测到间隔修改，立即执行下一次采集")
             except asyncio.TimeoutError:

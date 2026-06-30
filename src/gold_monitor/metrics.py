@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 _prometheus_client: ModuleType | None
 try:
     import prometheus_client as _prometheus_client
+
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     _prometheus_client = None
@@ -21,19 +22,25 @@ except ImportError:
     class MockMetric:
         def labels(self, *args, **kwargs):
             return self
+
         def inc(self, *args, **kwargs):
             pass
+
         def dec(self, *args, **kwargs):
             pass
+
         def set(self, *args, **kwargs):
             pass
+
         def observe(self, *args, **kwargs):
             pass
+
         def info(self, *args, **kwargs):
             pass
 
     def _mock_metric_factory(*args: Any, **kwargs: Any) -> MockMetric:
         return MockMetric()
+
 
 MetricFactory = Callable[..., Any]
 
@@ -42,7 +49,9 @@ if _prometheus_client is not None:
     Gauge: MetricFactory = cast(MetricFactory, _prometheus_client.Gauge)
     Histogram: MetricFactory = cast(MetricFactory, _prometheus_client.Histogram)
     Info: MetricFactory = cast(MetricFactory, _prometheus_client.Info)
-    generate_latest: Callable[[], bytes] = cast(Callable[[], bytes], _prometheus_client.generate_latest)
+    generate_latest: Callable[[], bytes] = cast(
+        Callable[[], bytes], _prometheus_client.generate_latest
+    )
     CONTENT_TYPE_LATEST = _prometheus_client.CONTENT_TYPE_LATEST
 else:
     Counter = _mock_metric_factory
@@ -62,114 +71,109 @@ else:
 FETCH_TOTAL = Counter(
     "gold_fetch_total",
     "Total number of price fetch attempts",
-    ["source", "status"]  # status: success, failure, timeout
+    ["source", "status"],  # status: success, failure, timeout
 )
 
 FETCH_LATENCY = Histogram(
     "gold_fetch_latency_seconds",
     "Price fetch latency in seconds",
     ["source"],
-    buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
 )
 
 # 价格指标
 CURRENT_PRICE = Gauge(
-    "gold_current_price_usd",
-    "Current gold price in USD per troy ounce"
+    "gold_current_price_usd", "Current gold price in USD per troy ounce"
 )
 
 PRICE_CHANGE_PERCENT = Gauge(
-    "gold_price_change_percent",
-    "Price change percentage in the last window"
+    "gold_price_change_percent", "Price change percentage in the last window"
 )
 
 # 告警指标
 ALERT_TOTAL = Counter(
     "gold_alert_total",
     "Total number of alerts triggered",
-    ["type"]  # alert kind: threshold_upper, threshold_lower, volatility, etc.
+    ["type"],  # alert kind: threshold_upper, threshold_lower, volatility, etc.
 )
 
-ALERT_ACTIVE = Gauge(
-    "gold_alert_active",
-    "Number of currently active alerts"
-)
+ALERT_ACTIVE = Gauge("gold_alert_active", "Number of currently active alerts")
 
 # 通知指标
 NOTIFICATION_TOTAL = Counter(
     "gold_notification_total",
     "Total number of notifications sent",
-    ["channel", "status"]  # channel: email, webhook, telegram; status: success, failure
+    [
+        "channel",
+        "status",
+    ],  # channel: email, webhook, telegram; status: success, failure
 )
 
 NOTIFICATION_LATENCY = Histogram(
     "gold_notification_latency_seconds",
     "Notification send latency in seconds",
     ["channel"],
-    buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0)
+    buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0),
 )
 
 # WebSocket 指标
 WS_CONNECTIONS = Gauge(
-    "gold_websocket_connections",
-    "Number of active WebSocket connections"
+    "gold_websocket_connections", "Number of active WebSocket connections"
 )
 
 WS_MESSAGES_TOTAL = Counter(
     "gold_websocket_messages_total",
     "Total WebSocket messages sent",
-    ["type"]  # message kind: price_update, alert, pong
+    ["type"],  # message kind: price_update, alert, pong
 )
 
 # API 指标
 API_REQUEST_TOTAL = Counter(
-    "gold_api_requests_total",
-    "Total API requests",
-    ["method", "endpoint", "status"]
+    "gold_api_requests_total", "Total API requests", ["method", "endpoint", "status"]
 )
 
 API_REQUEST_LATENCY = Histogram(
     "gold_api_request_latency_seconds",
     "API request latency in seconds",
     ["method", "endpoint"],
-    buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0)
+    buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
 )
 
 # 数据库指标
 DB_RECORDS_TOTAL = Gauge(
-    "gold_db_records_total",
-    "Total number of price records in database"
+    "gold_db_records_total", "Total number of price records in database"
 )
 
 DB_OPERATION_LATENCY = Histogram(
     "gold_db_operation_latency_seconds",
     "Database operation latency in seconds",
     ["operation"],  # operation: insert, select, delete
-    buckets=(0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0)
+    buckets=(0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0),
 )
 
 # 分析指标
 ANALYSIS_TOTAL = Counter(
     "gold_analysis_total",
     "Total number of AI analyses performed",
-    ["type", "provider"]  # analysis kind: volatility, smart; provider: openai, anthropic, etc.
+    [
+        "type",
+        "provider",
+    ],  # analysis kind: volatility, smart; provider: openai, anthropic, etc.
 )
 
 ANALYSIS_LATENCY = Histogram(
     "gold_analysis_latency_seconds",
     "AI analysis latency in seconds",
     ["type", "provider"],
-    buckets=(1.0, 5.0, 10.0, 30.0, 60.0, 120.0)
+    buckets=(1.0, 5.0, 10.0, 30.0, 60.0, 120.0),
 )
 
 # 系统信息
-SYSTEM_INFO = Info(
-    "gold_monitor",
-    "Gold monitor system information"
-)
+SYSTEM_INFO = Info("gold_monitor", "Gold monitor system information")
 
 
 # ============ 辅助函数 ============
+
 
 def record_fetch(source: str, success: bool, latency_seconds: float):
     """记录数据采集"""
@@ -191,7 +195,9 @@ def record_alert(alert_type: str):
     ALERT_TOTAL.labels(type=alert_type).inc()
 
 
-def record_notification(channel: str, success: bool, latency_seconds: float | None = None):
+def record_notification(
+    channel: str, success: bool, latency_seconds: float | None = None
+):
     """记录通知发送"""
     status = "success" if success else "failure"
     NOTIFICATION_TOTAL.labels(channel=channel, status=status).inc()
@@ -209,7 +215,9 @@ def record_ws_message(message_type: str):
     WS_MESSAGES_TOTAL.labels(type=message_type).inc()
 
 
-def record_api_request(method: str, endpoint: str, status_code: int, latency_seconds: float):
+def record_api_request(
+    method: str, endpoint: str, status_code: int, latency_seconds: float
+):
     """记录 API 请求"""
     # 简化 endpoint（去掉参数）
     endpoint = endpoint.split("?")[0]
@@ -218,7 +226,9 @@ def record_api_request(method: str, endpoint: str, status_code: int, latency_sec
 
     status = str(status_code)
     API_REQUEST_TOTAL.labels(method=method, endpoint=endpoint, status=status).inc()
-    API_REQUEST_LATENCY.labels(method=method, endpoint=endpoint).observe(latency_seconds)
+    API_REQUEST_LATENCY.labels(method=method, endpoint=endpoint).observe(
+        latency_seconds
+    )
 
 
 def update_db_records(count: int):
@@ -234,20 +244,25 @@ def record_db_operation(operation: str, latency_seconds: float):
 def record_analysis(analysis_type: str, provider: str, latency_seconds: float):
     """记录 AI 分析"""
     ANALYSIS_TOTAL.labels(type=analysis_type, provider=provider).inc()
-    ANALYSIS_LATENCY.labels(type=analysis_type, provider=provider).observe(latency_seconds)
+    ANALYSIS_LATENCY.labels(type=analysis_type, provider=provider).observe(
+        latency_seconds
+    )
 
 
 def set_system_info(version: str, data_source: str, fetch_interval: int):
     """设置系统信息"""
     if PROMETHEUS_AVAILABLE:
-        SYSTEM_INFO.info({
-            "version": version,
-            "data_source": data_source,
-            "fetch_interval": str(fetch_interval)
-        })
+        SYSTEM_INFO.info(
+            {
+                "version": version,
+                "data_source": data_source,
+                "fetch_interval": str(fetch_interval),
+            }
+        )
 
 
 # ============ 指标导出 ============
+
 
 def get_metrics() -> bytes:
     """获取所有指标（Prometheus 格式）"""
@@ -260,6 +275,7 @@ def get_metrics_content_type() -> str:
 
 
 # ============ 中间件辅助 ============
+
 
 class MetricsMiddleware:
     """FastAPI 中间件 - 自动记录 API 请求指标"""

@@ -41,7 +41,7 @@ class DataLifecycleManager:
         retention_days: int | None = None,
         hourly_aggregation_days: int | None = None,
         daily_aggregation_days: int | None = None,
-        backup_path: str | None = None
+        backup_path: str | None = None,
     ):
         self._db = database
         self._retention_days = retention_days or settings.data_retention_days
@@ -53,22 +53,26 @@ class DataLifecycleManager:
 
     async def cleanup(self) -> dict:
         """执行数据清理任务
-        
+
         Returns:
             {"deleted_count": int, "archived_count": int}
         """
         result = {
             "deleted_count": 0,
             "archived_count": 0,
-            "cleanup_time": datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            "cleanup_time": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         }
 
         try:
             # 1. 删除超过保留期的分钟级数据
-            cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=self._retention_days)
+            cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+                days=self._retention_days
+            )
             deleted = self._db.delete_old_prices(cutoff)
             result["deleted_count"] = deleted
-            logger.info("清理完成: 删除 %d 条旧数据（%d 天前）", deleted, self._retention_days)
+            logger.info(
+                "清理完成: 删除 %d 条旧数据（%d 天前）", deleted, self._retention_days
+            )
 
             # TODO: 实现数据聚合（分钟级 -> 小时级 -> 日级）
             # 这需要创建额外的聚合表
@@ -91,7 +95,9 @@ class DataLifecycleManager:
                 "oldest_record": oldest.timestamp.isoformat() if oldest else None,
                 "latest_record": latest.timestamp.isoformat() if latest else None,
                 "retention_days": self._retention_days,
-                "database_url": settings.database_url.split("///")[-1] if "sqlite" in settings.database_url else "remote"
+                "database_url": settings.database_url.split("///")[-1]
+                if "sqlite" in settings.database_url
+                else "remote",
             }
         except Exception as e:
             logger.error("获取数据统计失败: %s", e)
@@ -103,15 +109,15 @@ class DataLifecycleManager:
         self,
         start: datetime | None = None,
         end: datetime | None = None,
-        limit: int = 10000
+        limit: int = 10000,
     ) -> str:
         """导出数据为 CSV 格式
-        
+
         Args:
             start: 起始时间
             end: 结束时间
             limit: 最大记录数
-            
+
         Returns:
             CSV 字符串
         """
@@ -129,13 +135,15 @@ class DataLifecycleManager:
 
             # 写入数据
             for record in records:
-                writer.writerow([
-                    record.id,
-                    record.price,
-                    record.currency,
-                    record.source,
-                    record.timestamp.isoformat()
-                ])
+                writer.writerow(
+                    [
+                        record.id,
+                        record.price,
+                        record.currency,
+                        record.source,
+                        record.timestamp.isoformat(),
+                    ]
+                )
 
             logger.info("导出 CSV: %d 条记录", len(records))
             return output.getvalue()
@@ -148,15 +156,15 @@ class DataLifecycleManager:
         self,
         start: datetime | None = None,
         end: datetime | None = None,
-        limit: int = 10000
+        limit: int = 10000,
     ) -> str:
         """导出数据为 JSON 格式
-        
+
         Args:
             start: 起始时间
             end: 结束时间
             limit: 最大记录数
-            
+
         Returns:
             JSON 字符串
         """
@@ -167,7 +175,9 @@ class DataLifecycleManager:
                 records = self._db.get_recent_prices(limit)
 
             data = {
-                "export_time": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                "export_time": datetime.now(timezone.utc)
+                .replace(tzinfo=None)
+                .isoformat(),
                 "record_count": len(records),
                 "records": [
                     {
@@ -175,10 +185,10 @@ class DataLifecycleManager:
                         "price": r.price,
                         "currency": r.currency,
                         "source": r.source,
-                        "timestamp": r.timestamp.isoformat()
+                        "timestamp": r.timestamp.isoformat(),
                     }
                     for r in records
-                ]
+                ],
             }
 
             logger.info("导出 JSON: %d 条记录", len(records))
@@ -192,10 +202,10 @@ class DataLifecycleManager:
 
     async def backup_database(self, backup_name: str | None = None) -> BackupResult:
         """备份数据库
-        
+
         Args:
             backup_name: 备份文件名（不含扩展名）
-            
+
         Returns:
             {"success": bool, "backup_path": str, "size_bytes": int}
         """
@@ -203,7 +213,7 @@ class DataLifecycleManager:
             "success": False,
             "backup_path": None,
             "size_bytes": 0,
-            "backup_time": datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            "backup_time": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         }
 
         try:
@@ -226,8 +236,11 @@ class DataLifecycleManager:
                     result["backup_path"] = str(backup_file)
                     size_bytes = os.path.getsize(backup_file)
                     result["size_bytes"] = size_bytes
-                    logger.info("数据库备份完成: %s (%.2f MB)",
-                                backup_file, size_bytes / 1024 / 1024)
+                    logger.info(
+                        "数据库备份完成: %s (%.2f MB)",
+                        backup_file,
+                        size_bytes / 1024 / 1024,
+                    )
                 else:
                     result["error"] = f"数据库文件不存在: {db_path}"
             else:
@@ -235,7 +248,7 @@ class DataLifecycleManager:
                 json_data = await self.export_json(limit=100000)
                 backup_file = self._backup_path / f"{backup_name}.json"
 
-                with open(backup_file, 'w', encoding='utf-8') as f:
+                with open(backup_file, "w", encoding="utf-8") as f:
                     f.write(json_data)
 
                 result["success"] = True
@@ -258,14 +271,18 @@ class DataLifecycleManager:
                 return backups
 
             for f in self._backup_path.iterdir():
-                if f.is_file() and f.suffix in ('.db', '.json'):
+                if f.is_file() and f.suffix in (".db", ".json"):
                     stat = f.stat()
-                    backups.append({
-                        "name": f.name,
-                        "path": str(f),
-                        "size_bytes": stat.st_size,
-                        "created_at": datetime.fromtimestamp(stat.st_ctime).isoformat()
-                    })
+                    backups.append(
+                        {
+                            "name": f.name,
+                            "path": str(f),
+                            "size_bytes": stat.st_size,
+                            "created_at": datetime.fromtimestamp(
+                                stat.st_ctime
+                            ).isoformat(),
+                        }
+                    )
 
             backups.sort(key=lambda x: x["created_at"], reverse=True)
 
@@ -276,13 +293,13 @@ class DataLifecycleManager:
 
     async def restore_backup(self, backup_path: str) -> dict:
         """从备份恢复数据库
-        
+
         注意：这是一个危险操作，会覆盖现有数据
         """
         result = {
             "success": False,
             "restored_from": backup_path,
-            "restore_time": datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            "restore_time": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         }
 
         try:
@@ -291,7 +308,7 @@ class DataLifecycleManager:
                 result["error"] = f"备份文件不存在: {backup_path}"
                 return result
 
-            if "sqlite" in settings.database_url and backup_file.suffix == '.db':
+            if "sqlite" in settings.database_url and backup_file.suffix == ".db":
                 # SQLite 直接替换文件
                 db_path = settings.database_url.replace("sqlite:///", "")
 
@@ -359,7 +376,9 @@ def stop_cleanup_scheduler():
 _lifecycle_manager: Optional[DataLifecycleManager] = None
 
 
-def get_lifecycle_manager(database: Database | None = None) -> Optional[DataLifecycleManager]:
+def get_lifecycle_manager(
+    database: Database | None = None,
+) -> Optional[DataLifecycleManager]:
     """获取全局生命周期管理器"""
     global _lifecycle_manager
     if _lifecycle_manager is None and database:

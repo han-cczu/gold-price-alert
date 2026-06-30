@@ -6,8 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..llm_config import get_llm_config_manager, ModelProvider
 from ..schemas import (
-    ProviderProbeRequest, ProviderRequest, ProviderUpdateRequest,
-    SetActiveRequest, TestConnectionRequest,
+    ProviderProbeRequest,
+    ProviderRequest,
+    ProviderUpdateRequest,
+    SetActiveRequest,
+    TestConnectionRequest,
 )
 from ..state import require_admin_dep
 
@@ -44,7 +47,7 @@ async def get_llm_status():
             "mode": "mock",
             "message": "未配置，使用模拟分析",
             "provider_name": None,
-            "model": None
+            "model": None,
         }
 
     if active_provider.id == "mock":
@@ -53,7 +56,7 @@ async def get_llm_status():
             "mode": "mock",
             "message": "Mock 模式，返回固定分析结果",
             "provider_name": "Mock",
-            "model": None
+            "model": None,
         }
 
     if not active_provider.api_key:
@@ -62,7 +65,7 @@ async def get_llm_status():
             "mode": "mock",
             "message": f"平台 {active_provider.name} 未配置 API Key，使用模拟分析",
             "provider_name": active_provider.name,
-            "model": None
+            "model": None,
         }
 
     return {
@@ -70,7 +73,7 @@ async def get_llm_status():
         "mode": "ai",
         "message": "已启用 AI 分析",
         "provider_name": active_provider.name,
-        "model": config.active_model or "(默认模型)"
+        "model": config.active_model or "(默认模型)",
     }
 
 
@@ -81,22 +84,24 @@ async def get_providers():
     config = manager.get_config()
     return {
         "providers": [
-            p.to_safe_dict() if isinstance(p, ModelProvider) else ModelProvider(**p).to_safe_dict()
+            p.to_safe_dict()
+            if isinstance(p, ModelProvider)
+            else ModelProvider(**p).to_safe_dict()
             for p in config.providers
         ],
         "active_provider_id": config.active_provider_id,
-        "active_model": config.active_model
+        "active_model": config.active_model,
     }
 
 
 @router.post("/api/llm/providers")
-async def add_provider(request: ProviderRequest, _admin: bool = Depends(require_admin_dep)):
+async def add_provider(
+    request: ProviderRequest, _admin: bool = Depends(require_admin_dep)
+):
     """添加新的模型服务平台"""
     manager = get_llm_config_manager()
     provider = manager.add_provider(
-        name=request.name,
-        base_url=request.base_url,
-        api_key=request.api_key or ""
+        name=request.name, base_url=request.base_url, api_key=request.api_key or ""
     )
     return {"success": True, "provider": provider.to_safe_dict()}
 
@@ -105,7 +110,7 @@ async def add_provider(request: ProviderRequest, _admin: bool = Depends(require_
 async def update_provider(
     provider_id: str,
     request: ProviderUpdateRequest,
-    _admin: bool = Depends(require_admin_dep)
+    _admin: bool = Depends(require_admin_dep),
 ):
     """更新平台配置"""
     manager = get_llm_config_manager()
@@ -121,10 +126,7 @@ async def update_provider(
         new_api_key = current.api_key
 
     provider = manager.update_provider(
-        provider_id,
-        name=request.name,
-        base_url=request.base_url,
-        api_key=new_api_key
+        provider_id, name=request.name, base_url=request.base_url, api_key=new_api_key
     )
 
     if not provider:
@@ -148,7 +150,9 @@ async def delete_provider(provider_id: str, _admin: bool = Depends(require_admin
 
 
 @router.post("/api/llm/active")
-async def set_active_provider(request: SetActiveRequest, _admin: bool = Depends(require_admin_dep)):
+async def set_active_provider(
+    request: SetActiveRequest, _admin: bool = Depends(require_admin_dep)
+):
     """设置当前使用的平台和模型"""
     manager = get_llm_config_manager()
     success = manager.set_active(request.provider_id, request.model or "")
@@ -161,7 +165,7 @@ async def set_active_provider(request: SetActiveRequest, _admin: bool = Depends(
 async def fetch_provider_models(
     provider_id: str,
     request: Optional[ProviderProbeRequest] = None,
-    _admin: bool = Depends(require_admin_dep)
+    _admin: bool = Depends(require_admin_dep),
 ):
     """获取指定平台的模型列表。
 
@@ -192,8 +196,8 @@ async def fetch_provider_models(
         raise HTTPException(status_code=400, detail="请先填写 API 地址")
 
     # 智能拼接 URL
-    url = base_url.rstrip('/')
-    if not url.endswith('/v1') and '/v1' not in url:
+    url = base_url.rstrip("/")
+    if not url.endswith("/v1") and "/v1" not in url:
         models_url = f"{url}/v1/models"
     else:
         models_url = f"{url}/models"
@@ -201,8 +205,7 @@ async def fetch_provider_models(
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
-                models_url,
-                headers={"Authorization": f"Bearer {api_key}"}
+                models_url, headers={"Authorization": f"Bearer {api_key}"}
             )
 
             if resp.status_code == 401:
@@ -211,7 +214,7 @@ async def fetch_provider_models(
             if resp.status_code != 200:
                 raise HTTPException(
                     status_code=resp.status_code,
-                    detail=f"获取模型失败: {resp.text[:200]}"
+                    detail=f"获取模型失败: {resp.text[:200]}",
                 )
 
             data = resp.json()
@@ -222,11 +225,13 @@ async def fetch_provider_models(
             for m in models:
                 model_id = m.get("id", "")
                 if model_id:
-                    model_list.append({
-                        "id": model_id,
-                        "owned_by": m.get("owned_by", ""),
-                        "created": m.get("created", 0)
-                    })
+                    model_list.append(
+                        {
+                            "id": model_id,
+                            "owned_by": m.get("owned_by", ""),
+                            "created": m.get("created", 0),
+                        }
+                    )
 
             # 排序
             def sort_key(m):
@@ -247,11 +252,7 @@ async def fetch_provider_models(
             # 缓存模型列表
             manager.update_provider_models(provider_id, [m["id"] for m in model_list])
 
-            return {
-                "success": True,
-                "models": model_list,
-                "count": len(model_list)
-            }
+            return {"success": True, "models": model_list, "count": len(model_list)}
 
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="请求超时")
@@ -263,7 +264,7 @@ async def fetch_provider_models(
 async def test_provider_connection(
     provider_id: str,
     request: Optional[TestConnectionRequest] = None,
-    _admin: bool = Depends(require_admin_dep)
+    _admin: bool = Depends(require_admin_dep),
 ):
     """测试指定平台的连接 - 简单发送 hi 测试"""
     manager = get_llm_config_manager()
@@ -306,7 +307,7 @@ async def test_provider_connection(
         "model": test_model,
         "success": False,
         "message": "",
-        "response": None
+        "response": None,
     }
 
     if provider_id == "mock":
@@ -340,7 +341,7 @@ async def test_provider_connection(
         response = await client.chat.completions.create(
             model=test_model,
             messages=[{"role": "user", "content": "hi"}],
-            max_tokens=50
+            max_tokens=50,
         )
 
         reply = response.choices[0].message.content

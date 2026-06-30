@@ -20,10 +20,12 @@ async def get_collector_stats():
         "last_price": {
             "price": collector.last_price.price if collector.last_price else None,
             "source": collector.last_price.source if collector.last_price else None,
-            "timestamp": collector.last_price.timestamp.isoformat() if collector.last_price else None
+            "timestamp": collector.last_price.timestamp.isoformat()
+            if collector.last_price
+            else None,
         },
         "stats": collector.stats.to_dict(),
-        "config": collector.get_config()
+        "config": collector.get_config(),
     }
 
 
@@ -40,7 +42,9 @@ async def get_collector_config():
 @router.post("/api/collector/config")
 async def update_collector_config(
     interval: int = Query(None, ge=1, le=3600, description="采集间隔（秒）"),
-    strategy: str = Query(None, description="采集策略: single, fallback, parallel_first, parallel_vote")
+    strategy: str = Query(
+        None, description="采集策略: single, fallback, parallel_first, parallel_vote"
+    ),
 ):
     """运行时修改采集器配置"""
     collector = get_collector()
@@ -61,22 +65,19 @@ async def update_collector_config(
         except ValueError:
             raise HTTPException(
                 status_code=400,
-                detail=f"无效的策略: {strategy}，可选: single, fallback, parallel_first, parallel_vote"
+                detail=f"无效的策略: {strategy}，可选: single, fallback, parallel_first, parallel_vote",
             )
 
     if not changes:
         raise HTTPException(status_code=400, detail="请提供至少一个配置项")
 
     # 广播配置变更
-    await ws_manager.broadcast({
-        "type": "config_update",
-        "data": changes
-    })
+    await ws_manager.broadcast({"type": "config_update", "data": changes})
 
     return {
         "message": "配置已更新",
         "changes": changes,
-        "current_config": collector.get_config()
+        "current_config": collector.get_config(),
     }
 
 
@@ -118,9 +119,9 @@ async def detect_data_gaps(hours: int = Query(24, ge=1, le=168)):
             {
                 "start": gap[0].isoformat(),
                 "end": gap[1].isoformat(),
-                "duration_minutes": (gap[1] - gap[0]).total_seconds() / 60
+                "duration_minutes": (gap[1] - gap[0]).total_seconds() / 60,
             }
             for gap in gaps
         ],
-        "count": len(gaps)
+        "count": len(gaps),
     }

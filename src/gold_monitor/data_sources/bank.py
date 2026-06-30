@@ -21,17 +21,18 @@ class BankDefinition(TypedDict):
 @dataclass
 class BankGoldPrice:
     """银行金价数据"""
-    bank_name: str          # 银行名称
-    bank_code: str          # 银行代码
-    buy_price: float        # 买入价 (CNY/g)
-    sell_price: float       # 卖出价 (CNY/g)
-    timestamp: datetime     # 更新时间
+
+    bank_name: str  # 银行名称
+    bank_code: str  # 银行代码
+    buy_price: float  # 买入价 (CNY/g)
+    sell_price: float  # 卖出价 (CNY/g)
+    timestamp: datetime  # 更新时间
     product_name: str = "Au99.99"  # 产品名称
 
 
 class BankGoldDataSource(BaseDataSource):
     """银行金价数据源（模拟数据，实际可接入银行API）
-    
+
     注：由于各银行没有公开的免费API，这里使用模拟数据
     实际部署时可以：
     1. 爬取银行官网数据
@@ -69,26 +70,24 @@ class BankGoldDataSource(BaseDataSource):
             price=self._base_price_cny * 31.1035,  # 转换为 USD/oz
             currency="USD",
             timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
-            source=self.name
+            source=self.name,
         )
 
     async def fetch_base_price_cny(self) -> float:
         """获取基础金价（CNY/克）
-        
+
         从新浪财经获取实时国际金价，结合实时汇率计算
         """
         try:
             client = self._get_client()
-            
+
             # 1. 从新浪财经获取实时国际金价 (USD/oz)
             sina_headers = {
                 "Referer": "https://finance.sina.com.cn",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             }
             sina_resp = await client.get(
-                "https://hq.sinajs.cn/list=hf_GC",
-                headers=sina_headers,
-                timeout=5.0
+                "https://hq.sinajs.cn/list=hf_GC", headers=sina_headers, timeout=5.0
             )
             international_price = 2050.0  # 默认值
             if sina_resp.status_code == 200:
@@ -96,23 +95,26 @@ class BankGoldDataSource(BaseDataSource):
                 if match:
                     data = match.group(1).split(",")
                     international_price = float(data[0]) if data[0] else float(data[1])
-            
+
             # 2. 获取实时汇率
             rate_resp = await client.get(
-                "https://api.exchangerate-api.com/v4/latest/USD",
-                timeout=5.0
+                "https://api.exchangerate-api.com/v4/latest/USD", timeout=5.0
             )
             usd_cny = 7.2  # 默认汇率
             if rate_resp.status_code == 200:
                 rate_data = rate_resp.json()
                 usd_cny = rate_data.get("rates", {}).get("CNY", 7.2)
-            
+
             # 3. 计算人民币克价
             # 1 盎司 = 31.1035 克
             self._base_price_cny = (international_price * usd_cny) / 31.1035
 
         except Exception as e:
-            logger.warning("获取银行基准金价失败，沿用上次值 %.2f CNY/g: %s", self._base_price_cny, e)
+            logger.warning(
+                "获取银行基准金价失败，沿用上次值 %.2f CNY/g: %s",
+                self._base_price_cny,
+                e,
+            )
 
         return self._base_price_cny
 
@@ -120,23 +122,25 @@ class BankGoldDataSource(BaseDataSource):
         """获取所有银行金价"""
         base_price = await self.fetch_base_price_cny()
         now = datetime.now(timezone.utc).replace(tzinfo=None)
-        
+
         prices = []
         for bank in self.BANKS:
             spread = bank["spread"]
             # 买入价略低，卖出价略高
             buy_price = round(base_price - spread, 2)
             sell_price = round(base_price + spread, 2)
-            
-            prices.append(BankGoldPrice(
-                bank_name=bank["name"],
-                bank_code=bank["code"],
-                buy_price=buy_price,
-                sell_price=sell_price,
-                timestamp=now,
-                product_name="Au99.99"
-            ))
-        
+
+            prices.append(
+                BankGoldPrice(
+                    bank_name=bank["name"],
+                    bank_code=bank["code"],
+                    buy_price=buy_price,
+                    sell_price=sell_price,
+                    timestamp=now,
+                    product_name="Au99.99",
+                )
+            )
+
         return prices
 
     async def close(self):

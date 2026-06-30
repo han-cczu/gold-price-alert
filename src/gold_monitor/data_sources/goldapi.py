@@ -34,10 +34,7 @@ class GoldAPIDataSource(BaseDataSource):
 
     async def fetch_price(self) -> PriceData:
         """从 GoldAPI.io 获取金价"""
-        headers = {
-            "x-access-token": self._api_key,
-            "Content-Type": "application/json"
-        }
+        headers = {"x-access-token": self._api_key, "Content-Type": "application/json"}
 
         client = self._get_client()
         response = await client.get(self.API_URL, headers=headers)
@@ -53,7 +50,7 @@ class GoldAPIDataSource(BaseDataSource):
             price=round(float(price), 2),
             currency="USD",
             timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
-            source=self.name
+            source=self.name,
         )
 
     async def close(self):

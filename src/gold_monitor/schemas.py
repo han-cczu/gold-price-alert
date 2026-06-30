@@ -84,6 +84,7 @@ class BankPricesResponse(BaseModel):
 
 class ProviderRequest(BaseModel):
     """平台配置请求"""
+
     name: str
     base_url: str
     api_key: Optional[str] = None
@@ -91,6 +92,7 @@ class ProviderRequest(BaseModel):
 
 class ProviderUpdateRequest(BaseModel):
     """平台更新请求"""
+
     name: Optional[str] = None
     base_url: Optional[str] = None
     api_key: Optional[str] = None
@@ -98,12 +100,14 @@ class ProviderUpdateRequest(BaseModel):
 
 class SetActiveRequest(BaseModel):
     """设置当前使用的平台和模型"""
+
     provider_id: str
     model: Optional[str] = None
 
 
 class SmartAnalysisResponse(BaseModel):
     """智能分析响应"""
+
     title: str
     market_overview: str
     recent_trend: str
@@ -123,6 +127,7 @@ class SmartAnalysisResponse(BaseModel):
 
 class RefreshAnalysisRequest(BaseModel):
     """刷新分析请求"""
+
     model: Optional[str] = None
 
 
@@ -131,12 +136,14 @@ class ProviderProbeRequest(BaseModel):
 
     api_key/base_url 为空或脱敏（含 "..."）时，后端回退到已保存的平台配置。
     """
+
     api_key: Optional[str] = None
     base_url: Optional[str] = None
 
 
 class TestConnectionRequest(BaseModel):
     """测试连接请求：允许携带表单中尚未保存的 key/url。"""
+
     model: Optional[str] = None
     api_key: Optional[str] = None
     base_url: Optional[str] = None
@@ -144,10 +151,12 @@ class TestConnectionRequest(BaseModel):
 
 class NotificationConfigRequest(BaseModel):
     """通知渠道配置请求"""
+
     enabled: Optional[bool] = None
     config: Optional[dict] = None
 
 
 class NotificationTestRequest(BaseModel):
     """通知测试请求"""
+
     test_message: Optional[str] = None

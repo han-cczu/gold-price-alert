@@ -29,7 +29,7 @@ class SinaDataSource(BaseDataSource):
         """从新浪财经获取金价"""
         headers = {
             "Referer": "https://finance.sina.com.cn",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         }
 
         client = self._get_client()
@@ -51,7 +51,7 @@ class SinaDataSource(BaseDataSource):
             price=round(price, 2),
             currency="USD",
             timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
-            source=self.name
+            source=self.name,
         )
 
     async def close(self):

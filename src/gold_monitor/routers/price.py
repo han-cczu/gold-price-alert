@@ -13,7 +13,7 @@ router = APIRouter()
 
 @router.get("/api/chart/data", response_model=ChartDataResponse)
 async def get_chart_data(
-    hours: int = Query(default=24, ge=1, le=43800, description="查询小时数")
+    hours: int = Query(default=24, ge=1, le=43800, description="查询小时数"),
 ):
     """获取图表数据"""
     end_time = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -37,7 +37,7 @@ async def get_chart_data(
                 price_change=0,
                 price_change_percent=0,
                 high=0,
-                low=0
+                low=0,
             )
 
     # 根据时间范围调整时间格式
@@ -63,7 +63,7 @@ async def get_chart_data(
         price_change=price_change,
         price_change_percent=price_change_percent,
         high=max(prices) if prices else 0,
-        low=min(prices) if prices else 0
+        low=min(prices) if prices else 0,
     )
 
 
@@ -77,9 +77,7 @@ async def get_current_price():
     db.save_price(price_data.price, price_data.source)
 
     return PriceResponse(
-        price=price_data.price,
-        source=price_data.source,
-        timestamp=price_data.timestamp
+        price=price_data.price, source=price_data.source, timestamp=price_data.timestamp
     )
 
 
@@ -91,16 +89,14 @@ async def get_latest_price():
         raise HTTPException(status_code=404, detail="没有价格数据")
 
     return PriceResponse(
-        price=record.price,
-        source=record.source,
-        timestamp=record.timestamp
+        price=record.price, source=record.source, timestamp=record.timestamp
     )
 
 
 @router.get("/api/price/history", response_model=PriceHistoryResponse)
 async def get_price_history(
     hours: int = Query(default=24, ge=1, le=168, description="查询小时数"),
-    limit: int = Query(default=100, ge=1, le=1000, description="最大记录数")
+    limit: int = Query(default=100, ge=1, le=1000, description="最大记录数"),
 ):
     """获取历史价格"""
     end_time = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -115,17 +111,14 @@ async def get_price_history(
         "max": max(prices) if prices else 0,
         "min": min(prices) if prices else 0,
         "avg": sum(prices) / len(prices) if prices else 0,
-        "count": len(prices)
+        "count": len(prices),
     }
 
     return PriceHistoryResponse(
         data=[
-            PriceResponse(
-                price=r.price,
-                source=r.source,
-                timestamp=r.timestamp
-            ) for r in records
+            PriceResponse(price=r.price, source=r.source, timestamp=r.timestamp)
+            for r in records
         ],
         count=len(records),
-        stats=stats
+        stats=stats,
     )

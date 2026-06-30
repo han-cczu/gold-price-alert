@@ -2,6 +2,7 @@
 
 import pytest
 from fastapi import HTTPException
+from fastapi.routing import APIRoute
 
 from gold_monitor.config import settings
 from gold_monitor.security import SecretManager, APIKeyAuth, is_admin_path
@@ -110,11 +111,26 @@ async def test_require_admin_enabled_rejects_wrong_key(monkeypatch):
         await auth.require_admin(req)
 
 
+def _iter_api_routes(routes):
+    """兼容 FastAPI 新旧版本的 router include 内部结构。"""
+    for route in routes:
+        if isinstance(route, APIRoute):
+            yield route
+
+        original_router = getattr(route, "original_router", None)
+        if original_router is not None:
+            yield from _iter_api_routes(getattr(original_router, "routes", ()))
+
+        nested_routes = getattr(route, "routes", None)
+        if nested_routes:
+            yield from _iter_api_routes(nested_routes)
+
+
 def test_llm_write_endpoints_have_route_level_admin_dependency():
     """LLM 写接口应由路由依赖自身保护，不只依赖中间件前缀。"""
     write_methods = {"POST", "PUT", "PATCH", "DELETE"}
     llm_write_routes = [
-        route for route in app.routes
+        route for route in _iter_api_routes(app.routes)
         if getattr(route, "path", "").startswith("/api/llm")
         and write_methods.intersection(getattr(route, "methods", set()))
     ]

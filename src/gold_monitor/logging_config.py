@@ -9,7 +9,7 @@ from typing import Optional
 
 class SensitiveDataFilter(logging.Filter):
     """敏感数据脱敏过滤器
-    
+
     自动脱敏以下内容：
     - API Key
     - 邮箱地址
@@ -21,28 +21,33 @@ class SensitiveDataFilter(logging.Filter):
     # 脱敏规则
     PATTERNS = [
         # API Key (常见格式)
-        (r'(api[_-]?key|apikey|access[_-]?token|bearer)\s*[=:]\s*["\']?([a-zA-Z0-9_-]{20,})["\']?',
-         r'\1=***REDACTED***'),
+        (
+            r'(api[_-]?key|apikey|access[_-]?token|bearer)\s*[=:]\s*["\']?([a-zA-Z0-9_-]{20,})["\']?',
+            r"\1=***REDACTED***",
+        ),
         # Anthropic API Key
-        (r'(sk-ant-[a-zA-Z0-9_-]{20,})', r'sk-ant-***REDACTED***'),
+        (r"(sk-ant-[a-zA-Z0-9_-]{20,})", r"sk-ant-***REDACTED***"),
         # OpenAI API Key
-        (r'(sk-[a-zA-Z0-9]{20,})', r'sk-***REDACTED***'),
+        (r"(sk-[a-zA-Z0-9]{20,})", r"sk-***REDACTED***"),
         # 邮箱地址
-        (r'([a-zA-Z0-9_.+-]+)@([a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)',
-         r'***@\2'),
+        (r"([a-zA-Z0-9_.+-]+)@([a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", r"***@\2"),
         # 手机号码 (中国)
-        (r'(1[3-9]\d)\d{4}(\d{4})', r'\1****\2'),
+        (r"(1[3-9]\d)\d{4}(\d{4})", r"\1****\2"),
         # 密码字段
-        (r'(password|passwd|pwd|secret)\s*[=:]\s*["\']?([^"\'\s,}]+)["\']?',
-         r'\1=***REDACTED***'),
+        (
+            r'(password|passwd|pwd|secret)\s*[=:]\s*["\']?([^"\'\s,}]+)["\']?',
+            r"\1=***REDACTED***",
+        ),
         # Bot Token
-        (r'(\d{9,}:[a-zA-Z0-9_-]{30,})', r'***BOT_TOKEN***'),
+        (r"(\d{9,}:[a-zA-Z0-9_-]{30,})", r"***BOT_TOKEN***"),
         # 通用 Token
-        (r'(token|auth)\s*[=:]\s*["\']?([a-zA-Z0-9_.-]{20,})["\']?',
-         r'\1=***REDACTED***'),
+        (
+            r'(token|auth)\s*[=:]\s*["\']?([a-zA-Z0-9_.-]{20,})["\']?',
+            r"\1=***REDACTED***",
+        ),
     ]
 
-    def __init__(self, name: str = ''):
+    def __init__(self, name: str = ""):
         super().__init__(name)
         self._compiled_patterns = [
             (re.compile(pattern, re.IGNORECASE), replacement)
@@ -71,13 +76,13 @@ class ColoredFormatter(logging.Formatter):
     """彩色日志格式化器（控制台用）"""
 
     COLORS = {
-        'DEBUG': '\033[36m',    # 青色
-        'INFO': '\033[32m',     # 绿色
-        'WARNING': '\033[33m',  # 黄色
-        'ERROR': '\033[31m',    # 红色
-        'CRITICAL': '\033[35m', # 紫色
+        "DEBUG": "\033[36m",  # 青色
+        "INFO": "\033[32m",  # 绿色
+        "WARNING": "\033[33m",  # 黄色
+        "ERROR": "\033[31m",  # 红色
+        "CRITICAL": "\033[35m",  # 紫色
     }
-    RESET = '\033[0m'
+    RESET = "\033[0m"
 
     def format(self, record: logging.LogRecord) -> str:
         color = self.COLORS.get(record.levelname, self.RESET)
@@ -89,16 +94,16 @@ def setup_logging(
     level: str = "INFO",
     log_file: Optional[str] = None,
     enable_color: bool = True,
-    enable_sanitize: bool = True
+    enable_sanitize: bool = True,
 ) -> logging.Logger:
     """配置日志系统
-    
+
     Args:
         level: 日志级别 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         log_file: 日志文件路径（可选）
         enable_color: 是否启用彩色输出
         enable_sanitize: 是否启用敏感数据脱敏
-    
+
     Returns:
         配置好的 Logger 实例
     """
@@ -110,7 +115,9 @@ def setup_logging(
     logger.handlers.clear()
 
     # 日志格式
-    log_format = "%(asctime)s | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d - %(message)s"
+    log_format = (
+        "%(asctime)s | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d - %(message)s"
+    )
     date_format = "%Y-%m-%d %H:%M:%S"
 
     # 控制台处理器
@@ -132,7 +139,7 @@ def setup_logging(
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(logging.Formatter(log_format, date_format))
 

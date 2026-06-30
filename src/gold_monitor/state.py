@@ -22,11 +22,12 @@ from .models import Database
 from .alert import AlertMonitor, Alert
 from .llm_config import get_llm_config_manager
 from .data_sources.base import PriceData
-from .security import (
-    get_api_key_auth, get_rate_limiter, APIKeyAuth, RateLimiter
-)
+from .security import get_api_key_auth, get_rate_limiter, APIKeyAuth, RateLimiter
 from .metrics import (
-    record_price, record_alert, update_ws_connections, record_ws_message
+    record_price,
+    record_alert,
+    update_ws_connections,
+    record_ws_message,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,7 @@ def get_app_start_time() -> datetime:
 
 # ---- alert_monitor 访问器 ----
 
+
 def get_alert_monitor() -> Optional[AlertMonitor]:
     return _alert_monitor
 
@@ -74,6 +76,7 @@ def set_alert_monitor(monitor: Optional[AlertMonitor]) -> None:
 
 
 # ---- daily analysis task 访问器 ----
+
 
 def get_daily_analysis_task() -> Optional[asyncio.Task]:
     return _daily_analysis_task
@@ -86,11 +89,13 @@ def set_daily_analysis_task(task: Optional[asyncio.Task]) -> None:
 
 # ---- smart analysis cache 访问器 ----
 
+
 def get_smart_analysis_cache() -> Optional[dict]:
     return _smart_analysis_cache
 
 
 # ---- 安全组件访问器 ----
+
 
 def get_auth() -> APIKeyAuth:
     """获取 API 鉴权组件"""
@@ -119,6 +124,7 @@ async def require_admin_dep(request: Request):
 
 # ============ WebSocket 连接管理器 ============
 
+
 class ConnectionManager:
     """WebSocket 连接管理器 - 管理所有客户端连接"""
 
@@ -131,14 +137,18 @@ class ConnectionManager:
         await websocket.accept()
         async with self._lock:
             self.active_connections.append(websocket)
-        logger.info("WebSocket 客户端连接，当前连接数: %d", len(self.active_connections))
+        logger.info(
+            "WebSocket 客户端连接，当前连接数: %d", len(self.active_connections)
+        )
 
     async def disconnect(self, websocket: WebSocket):
         """断开连接"""
         async with self._lock:
             if websocket in self.active_connections:
                 self.active_connections.remove(websocket)
-        logger.info("WebSocket 客户端断开，当前连接数: %d", len(self.active_connections))
+        logger.info(
+            "WebSocket 客户端断开，当前连接数: %d", len(self.active_connections)
+        )
 
     async def broadcast(self, message: dict):
         """广播消息到所有连接"""
@@ -178,15 +188,17 @@ async def on_price_update(price_data: PriceData):
     update_ws_connections(ws_manager.connection_count)
 
     # 广播价格更新
-    await ws_manager.broadcast({
-        "type": "price_update",
-        "data": {
-            "price": price_data.price,
-            "currency": price_data.currency,
-            "source": price_data.source,
-            "timestamp": price_data.timestamp.isoformat()
+    await ws_manager.broadcast(
+        {
+            "type": "price_update",
+            "data": {
+                "price": price_data.price,
+                "currency": price_data.currency,
+                "source": price_data.source,
+                "timestamp": price_data.timestamp.isoformat(),
+            },
         }
-    })
+    )
     record_ws_message("price_update")
 
     # 检查告警
@@ -199,15 +211,17 @@ async def on_price_update(price_data: PriceData):
             # 广播告警并记录指标
             for alert in alerts:
                 record_alert(alert.alert_type.value)
-                await ws_manager.broadcast({
-                    "type": "alert",
-                    "data": {
-                        "alert_type": alert.alert_type.value,
-                        "price": alert.price,
-                        "message": alert.message,
-                        "triggered_at": alert.triggered_at.isoformat()
+                await ws_manager.broadcast(
+                    {
+                        "type": "alert",
+                        "data": {
+                            "alert_type": alert.alert_type.value,
+                            "price": alert.price,
+                            "message": alert.message,
+                            "triggered_at": alert.triggered_at.isoformat(),
+                        },
                     }
-                })
+                )
                 record_ws_message("alert")
 
 
@@ -236,7 +250,11 @@ async def _run_smart_analysis(model: Optional[str] = None) -> dict:
                 provider_name = (active_provider.name or "").lower()
                 if "deepseek" in provider_name:
                     use_model = "deepseek-chat"
-                elif "qwen" in provider_name or "通义" in provider_name or "dashscope" in (active_provider.base_url or "").lower():
+                elif (
+                    "qwen" in provider_name
+                    or "通义" in provider_name
+                    or "dashscope" in (active_provider.base_url or "").lower()
+                ):
                     use_model = "qwen-turbo"
                 elif "moonshot" in provider_name or "kimi" in provider_name:
                     use_model = "moonshot-v1-8k"
@@ -244,9 +262,14 @@ async def _run_smart_analysis(model: Optional[str] = None) -> dict:
                     use_model = "glm-4"
                 # 其他情况保持 None，让 provider 使用其默认值
 
-            if not active_provider or active_provider.id == "mock" or not active_provider.api_key:
+            if (
+                not active_provider
+                or active_provider.id == "mock"
+                or not active_provider.api_key
+            ):
                 # Mock 模式
                 from .analyzer import MockLLMProvider
+
                 mock_provider = MockLLMProvider()
                 report = await mock_provider.smart_analyze()
                 model_used = "Mock"
@@ -255,17 +278,19 @@ async def _run_smart_analysis(model: Optional[str] = None) -> dict:
                 from .analyzer import LLMProvider, OpenAIProvider, AnthropicProvider
 
                 provider: LLMProvider
-                if "anthropic" in (active_provider.base_url or "").lower() or "claude" in (active_provider.name or "").lower():
+                if (
+                    "anthropic" in (active_provider.base_url or "").lower()
+                    or "claude" in (active_provider.name or "").lower()
+                ):
                     provider = AnthropicProvider(
-                        api_key=active_provider.api_key,
-                        model=use_model
+                        api_key=active_provider.api_key, model=use_model
                     )
                     model_used = use_model or provider.model
                 else:
                     provider = OpenAIProvider(
                         api_key=active_provider.api_key,
                         base_url=active_provider.base_url,
-                        model=use_model
+                        model=use_model,
                     )
                     model_used = use_model or provider.model
 
@@ -299,10 +324,14 @@ async def _daily_analysis_scheduler():
         try:
             # 计算距离下一个0点的秒数
             now = datetime.now()
-            tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+            tomorrow = now.replace(
+                hour=0, minute=0, second=0, microsecond=0
+            ) + timedelta(days=1)
             seconds_until_midnight = (tomorrow - now).total_seconds()
 
-            logger.info(f"智能分析定时任务：将在 {seconds_until_midnight/3600:.1f} 小时后执行（明天0点）")
+            logger.info(
+                f"智能分析定时任务：将在 {seconds_until_midnight / 3600:.1f} 小时后执行（明天0点）"
+            )
 
             # 等待到0点
             await asyncio.sleep(seconds_until_midnight)

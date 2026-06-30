@@ -10,14 +10,13 @@ from ..collector import create_data_source, get_collector
 from ..llm_config import get_llm_config_manager
 from ..schemas import HealthResponse
 from ..state import db, ws_manager, get_auth, get_app_start_time
-from ..metrics import (
-    get_metrics, get_metrics_content_type, update_db_records
-)
+from ..metrics import get_metrics, get_metrics_content_type, update_db_records
 
 router = APIRouter()
 
 
 # ============ WebSocket 端点 ============
+
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -34,15 +33,17 @@ async def websocket_endpoint(websocket: WebSocket):
     collector = get_collector()
     if collector and collector.last_price:
         assert collector.last_price.timestamp is not None
-        await websocket.send_json({
-            "type": "price_update",
-            "data": {
-                "price": collector.last_price.price,
-                "currency": collector.last_price.currency,
-                "source": collector.last_price.source,
-                "timestamp": collector.last_price.timestamp.isoformat()
+        await websocket.send_json(
+            {
+                "type": "price_update",
+                "data": {
+                    "price": collector.last_price.price,
+                    "currency": collector.last_price.currency,
+                    "source": collector.last_price.source,
+                    "timestamp": collector.last_price.timestamp.isoformat(),
+                },
             }
-        })
+        )
 
     try:
         while True:
@@ -61,10 +62,7 @@ async def websocket_endpoint(websocket: WebSocket):
 @router.get("/ws/status")
 async def websocket_status():
     """WebSocket 连接状态"""
-    return {
-        "active_connections": ws_manager.connection_count,
-        "endpoint": "/ws"
-    }
+    return {"active_connections": ws_manager.connection_count, "endpoint": "/ws"}
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -85,20 +83,25 @@ async def health_check():
     db_status = "connected"
     try:
         from sqlalchemy import text
+
         with db.get_session() as session:
             session.execute(text("SELECT 1"))
     except Exception:
         db_status = "disconnected"
 
     # 计算运行时间
-    uptime = (datetime.now(timezone.utc).replace(tzinfo=None) - get_app_start_time()).total_seconds()
+    uptime = (
+        datetime.now(timezone.utc).replace(tzinfo=None) - get_app_start_time()
+    ).total_seconds()
 
     # 检查采集器状态
     collector_running = collector is not None and collector.is_running
     collector_stats = collector.stats.to_dict() if collector else None
 
     # 判断整体健康状态
-    status = "healthy" if db_status == "connected" and collector_running else "unhealthy"
+    status = (
+        "healthy" if db_status == "connected" and collector_running else "unhealthy"
+    )
 
     return HealthResponse(
         status=status,
@@ -110,7 +113,7 @@ async def health_check():
         last_price=last_record.price if last_record else None,
         last_update=last_record.timestamp if last_record else None,
         uptime_seconds=uptime,
-        fetch_interval=settings.fetch_interval
+        fetch_interval=settings.fetch_interval,
     )
 
 
@@ -126,8 +129,10 @@ async def get_config():
         "alert_price_upper": settings.alert_price_upper,
         "alert_price_lower": settings.alert_price_lower,
         # 返回当前激活的平台 ID（不返回 API Key）
-        "llm_provider": active_provider.id if active_provider else (llm_config.active_provider_id or "mock"),
-        "llm_model": llm_config.active_model or None
+        "llm_provider": active_provider.id
+        if active_provider
+        else (llm_config.active_provider_id or "mock"),
+        "llm_model": llm_config.active_model or None,
     }
 
 
@@ -141,10 +146,7 @@ async def prometheus_metrics():
     except Exception:
         pass
 
-    return Response(
-        content=get_metrics(),
-        media_type=get_metrics_content_type()
-    )
+    return Response(content=get_metrics(), media_type=get_metrics_content_type())
 
 
 @router.get("/api/security/status")
@@ -155,5 +157,5 @@ async def get_security_status():
         "auth_enabled": settings.enable_auth,
         "rate_limit_per_minute": settings.rate_limit_per_minute,
         "admin_key_configured": bool(settings.admin_api_key),
-        "admin_key_hint": auth.admin_key[:8] + "..." if auth.admin_key else None
+        "admin_key_hint": auth.admin_key[:8] + "..." if auth.admin_key else None,
     }

@@ -28,7 +28,7 @@ class MockDataSource(BaseDataSource):
         """生成模拟金价数据"""
         # 模拟价格随机波动
         change_percent = random.uniform(-self._volatility, self._volatility)
-        self._current_price *= (1 + change_percent / 100)
+        self._current_price *= 1 + change_percent / 100
 
         # 限制价格在合理范围内
         self._current_price = max(1800, min(2500, self._current_price))
@@ -37,5 +37,5 @@ class MockDataSource(BaseDataSource):
             price=round(self._current_price, 2),
             currency="USD",
             timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
-            source=self.name
+            source=self.name,
         )

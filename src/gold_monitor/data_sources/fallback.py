@@ -46,7 +46,7 @@ class FallbackDataSource(BaseDataSource):
                         logger.warning(
                             "数据源切换: %s -> %s",
                             self._sources[self._current_index].name,
-                            source.name
+                            source.name,
                         )
                         self._current_index = idx
                     return data
@@ -56,14 +56,11 @@ class FallbackDataSource(BaseDataSource):
                         self._failure_counts.get(source.name, 0) + 1
                     )
                     logger.warning(
-                        "数据源 %s 第 %d 次请求失败: %s",
-                        source.name, retry + 1, e
+                        "数据源 %s 第 %d 次请求失败: %s", source.name, retry + 1, e
                     )
 
         # 所有源都失败
-        raise ConnectionError(
-            f"所有数据源均不可用，最后错误: {last_error}"
-        )
+        raise ConnectionError(f"所有数据源均不可用，最后错误: {last_error}")
 
     async def health_check(self) -> bool:
         """检查是否至少有一个数据源可用"""
@@ -77,10 +74,7 @@ class FallbackDataSource(BaseDataSource):
         return {
             "active": self._sources[self._current_index].name,
             "sources": [
-                {
-                    "name": s.name,
-                    "failures": self._failure_counts.get(s.name, 0)
-                }
+                {"name": s.name, "failures": self._failure_counts.get(s.name, 0)}
                 for s in self._sources
-            ]
+            ],
         }

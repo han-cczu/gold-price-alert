@@ -5,9 +5,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Query
 
-from ..schemas import (
-    ExchangeRateResponse, BankPriceResponse, BankPricesResponse
-)
+from ..schemas import ExchangeRateResponse, BankPriceResponse, BankPricesResponse
 from ..state import _exchange_rate_cache
 
 router = APIRouter()
@@ -20,33 +18,36 @@ async def get_exchange_rate():
     from datetime import timedelta
 
     # 检查缓存是否有效（30分钟）
-    if (_exchange_rate_cache["updated_at"] and
-            datetime.now(timezone.utc).replace(tzinfo=None) - _exchange_rate_cache["updated_at"] < timedelta(minutes=30)):
+    if _exchange_rate_cache["updated_at"] and datetime.now(timezone.utc).replace(
+        tzinfo=None
+    ) - _exchange_rate_cache["updated_at"] < timedelta(minutes=30):
         return ExchangeRateResponse(
             usd_cny=_exchange_rate_cache["usd_cny"],
-            updated_at=_exchange_rate_cache["updated_at"]
+            updated_at=_exchange_rate_cache["updated_at"],
         )
 
     # 尝试从免费 API 获取汇率
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             # 使用央行汇率接口或其他免费接口
-            resp = await client.get(
-                "https://api.exchangerate-api.com/v4/latest/USD"
-            )
+            resp = await client.get("https://api.exchangerate-api.com/v4/latest/USD")
             if resp.status_code == 200:
                 data = resp.json()
                 rate = data.get("rates", {}).get("CNY", 7.2)
                 _exchange_rate_cache["usd_cny"] = rate
-                _exchange_rate_cache["updated_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
+                _exchange_rate_cache["updated_at"] = datetime.now(timezone.utc).replace(
+                    tzinfo=None
+                )
     except Exception:
         # 获取失败使用缓存或默认值
         if _exchange_rate_cache["updated_at"] is None:
-            _exchange_rate_cache["updated_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
+            _exchange_rate_cache["updated_at"] = datetime.now(timezone.utc).replace(
+                tzinfo=None
+            )
 
     return ExchangeRateResponse(
         usd_cny=_exchange_rate_cache["usd_cny"],
-        updated_at=_exchange_rate_cache["updated_at"]
+        updated_at=_exchange_rate_cache["updated_at"],
     )
 
 
@@ -70,30 +71,35 @@ async def get_bank_prices():
                 buy_price=p.buy_price,
                 sell_price=p.sell_price,
                 timestamp=p.timestamp,
-                product_name=p.product_name
-            ) for p in bank_prices
+                product_name=p.product_name,
+            )
+            for p in bank_prices
         ],
         base_price_cny=base_price,
         london_gold_cny=london_gold_cny,
-        updated_at=datetime.now(timezone.utc).replace(tzinfo=None)
+        updated_at=datetime.now(timezone.utc).replace(tzinfo=None),
     )
 
 
 @router.get("/api/convert")
 async def convert_gold_price(
     price: float = Query(..., description="价格"),
-    from_unit: Literal["oz", "g", "kg"] = Query(default="oz", description="原单位: oz, g, kg"),
-    to_unit: Literal["oz", "g", "kg"] = Query(default="g", description="目标单位: oz, g, kg"),
-    from_currency: Literal["USD", "CNY"] = Query(default="USD", description="原币种: USD, CNY"),
-    to_currency: Literal["USD", "CNY"] = Query(default="CNY", description="目标币种: USD, CNY")
+    from_unit: Literal["oz", "g", "kg"] = Query(
+        default="oz", description="原单位: oz, g, kg"
+    ),
+    to_unit: Literal["oz", "g", "kg"] = Query(
+        default="g", description="目标单位: oz, g, kg"
+    ),
+    from_currency: Literal["USD", "CNY"] = Query(
+        default="USD", description="原币种: USD, CNY"
+    ),
+    to_currency: Literal["USD", "CNY"] = Query(
+        default="CNY", description="目标币种: USD, CNY"
+    ),
 ):
     """金价单位和币种换算"""
     # 单位换算系数（相对于盎司）
-    unit_factors = {
-        "oz": 1.0,
-        "g": 31.1035,
-        "kg": 0.0311035
-    }
+    unit_factors = {"oz": 1.0, "g": 31.1035, "kg": 0.0311035}
 
     # 获取汇率
     usd_cny = _exchange_rate_cache.get("usd_cny") or 7.2
@@ -101,7 +107,7 @@ async def convert_gold_price(
         ("USD", "CNY"): usd_cny,
         ("CNY", "USD"): 1 / usd_cny,
         ("USD", "USD"): 1.0,
-        ("CNY", "CNY"): 1.0
+        ("CNY", "CNY"): 1.0,
     }
 
     # 先转换单位
@@ -114,15 +120,11 @@ async def convert_gold_price(
     converted_price *= rate
 
     return {
-        "original": {
-            "price": price,
-            "unit": from_unit,
-            "currency": from_currency
-        },
+        "original": {"price": price, "unit": from_unit, "currency": from_currency},
         "converted": {
             "price": round(converted_price, 2),
             "unit": to_unit,
-            "currency": to_currency
+            "currency": to_currency,
         },
-        "exchange_rate": usd_cny
+        "exchange_rate": usd_cny,
     }
