@@ -1,5 +1,6 @@
 """告警模块测试"""
 
+import io
 import shutil
 import tempfile
 
@@ -234,3 +235,28 @@ async def test_console_notification():
 
     result = await notification.send(alert)
     assert result is True
+
+
+@pytest.mark.asyncio
+async def test_console_notification_handles_narrow_console_encoding(monkeypatch):
+    """控制台编码不支持 emoji 时不应导致通知失败"""
+    from rich.console import Console
+
+    output = io.TextIOWrapper(
+        io.BytesIO(), encoding="cp1252", errors="strict", write_through=True
+    )
+
+    monkeypatch.setattr(
+        "rich.console.Console",
+        lambda *args, **kwargs: Console(file=output, force_terminal=False),
+    )
+
+    notification = ConsoleNotification()
+    alert = Alert(
+        alert_type=AlertType.THRESHOLD_UPPER,
+        price=2150.0,
+        message="test alert",
+        triggered_at=datetime.now(timezone.utc).replace(tzinfo=None)
+    )
+
+    assert await notification.send(alert) is True

@@ -90,7 +90,7 @@ async def get_providers():
 
 
 @router.post("/api/llm/providers")
-async def add_provider(request: ProviderRequest):
+async def add_provider(request: ProviderRequest, _admin: bool = Depends(require_admin_dep)):
     """添加新的模型服务平台"""
     manager = get_llm_config_manager()
     provider = manager.add_provider(
@@ -102,7 +102,11 @@ async def add_provider(request: ProviderRequest):
 
 
 @router.put("/api/llm/providers/{provider_id}")
-async def update_provider(provider_id: str, request: ProviderUpdateRequest):
+async def update_provider(
+    provider_id: str,
+    request: ProviderUpdateRequest,
+    _admin: bool = Depends(require_admin_dep)
+):
     """更新平台配置"""
     manager = get_llm_config_manager()
 
@@ -130,7 +134,7 @@ async def update_provider(provider_id: str, request: ProviderUpdateRequest):
 
 
 @router.delete("/api/llm/providers/{provider_id}")
-async def delete_provider(provider_id: str):
+async def delete_provider(provider_id: str, _admin: bool = Depends(require_admin_dep)):
     """删除平台"""
     # 不允许删除 mock
     if provider_id == "mock":
@@ -144,7 +148,7 @@ async def delete_provider(provider_id: str):
 
 
 @router.post("/api/llm/active")
-async def set_active_provider(request: SetActiveRequest):
+async def set_active_provider(request: SetActiveRequest, _admin: bool = Depends(require_admin_dep)):
     """设置当前使用的平台和模型"""
     manager = get_llm_config_manager()
     success = manager.set_active(request.provider_id, request.model or "")
@@ -154,7 +158,11 @@ async def set_active_provider(request: SetActiveRequest):
 
 
 @router.post("/api/llm/providers/{provider_id}/models")
-async def fetch_provider_models(provider_id: str, request: Optional[ProviderProbeRequest] = None):
+async def fetch_provider_models(
+    provider_id: str,
+    request: Optional[ProviderProbeRequest] = None,
+    _admin: bool = Depends(require_admin_dep)
+):
     """获取指定平台的模型列表。
 
     允许使用表单中尚未保存的 key/url（通过请求体传入），无需先点保存即可获取。
@@ -252,7 +260,11 @@ async def fetch_provider_models(provider_id: str, request: Optional[ProviderProb
 
 
 @router.post("/api/llm/providers/{provider_id}/test")
-async def test_provider_connection(provider_id: str, request: Optional[TestConnectionRequest] = None):
+async def test_provider_connection(
+    provider_id: str,
+    request: Optional[TestConnectionRequest] = None,
+    _admin: bool = Depends(require_admin_dep)
+):
     """测试指定平台的连接 - 简单发送 hi 测试"""
     manager = get_llm_config_manager()
     provider = manager.get_provider(provider_id)

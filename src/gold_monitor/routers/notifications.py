@@ -93,14 +93,21 @@ async def test_notification(channel: str, request: Optional[NotificationTestRequ
     """测试通知发送"""
     from ..alert import (
         Alert, AlertType, ConsoleNotification,
-        EmailNotification, WebhookNotification, TelegramNotification
+        EmailNotification, WebhookNotification, TelegramNotification,
+        NotificationChannel,
+    )
+
+    test_message = (
+        request.test_message
+        if request and request.test_message
+        else "这是一条测试通知"
     )
 
     # 创建测试告警
     test_alert = Alert(
         alert_type=AlertType.VOLATILITY,
         price=2000.0,
-        message=request.test_message if request else "这是一条测试通知",
+        message=test_message,
         triggered_at=datetime.now(timezone.utc).replace(tzinfo=None)
     )
 
@@ -112,7 +119,7 @@ async def test_notification(channel: str, request: Optional[NotificationTestRequ
 
     try:
         if channel == "console":
-            notification = ConsoleNotification()
+            notification: NotificationChannel = ConsoleNotification()
             success = await notification.send(test_alert)
             result["success"] = success
             result["message"] = "控制台通知已发送（查看服务器日志）"
@@ -166,7 +173,7 @@ async def test_notification(channel: str, request: Optional[NotificationTestRequ
     db.save_notification_log(
         channel=channel,
         status="success" if result["success"] else "failed",
-        error_message=result["message"] if not result["success"] else None
+        error_message=str(result["message"]) if not result["success"] else None
     )
 
     return result

@@ -20,14 +20,14 @@ logger = logging.getLogger(__name__)
 class SecretManager:
     """密钥管理器 - 加密存储敏感信息"""
 
-    def __init__(self, secret_key: str = None):
+    def __init__(self, secret_key: str | None = None):
         """
         初始化密钥管理器
         
         Args:
             secret_key: 主密钥，如果不提供则从环境变量获取或自动生成
         """
-        self._key = secret_key or os.getenv("GOLD_SECRET_KEY")
+        self._key = secret_key or os.getenv("GOLD_SECRET_KEY") or settings.secret_key
         if not self._key:
             self._key = self._generate_key()
             logger.warning("未配置 GOLD_SECRET_KEY，使用自动生成的密钥（重启后将无法解密旧数据）")
@@ -106,14 +106,14 @@ class SecretManager:
 class APIKeyAuth:
     """API Key 鉴权"""
 
-    def __init__(self, admin_api_key: str = None):
+    def __init__(self, admin_api_key: str | None = None):
         """
         初始化 API Key 鉴权
         
         Args:
             admin_api_key: 管理接口 API Key，如果不提供则从环境变量获取
         """
-        self._admin_key = admin_api_key or os.getenv("GOLD_ADMIN_API_KEY", "")
+        self._admin_key = admin_api_key or os.getenv("GOLD_ADMIN_API_KEY") or settings.admin_api_key
         if not self._admin_key:
             # 如果未配置，生成一个临时的（生产环境应该配置）
             self._admin_key = secrets.token_urlsafe(32)
@@ -130,7 +130,7 @@ class APIKeyAuth:
     def verify_admin_key(self, request: Request) -> bool:
         """验证管理 API Key"""
         key = request.headers.get("X-Admin-Key") or request.query_params.get("admin_key")
-        return key and secrets.compare_digest(key, self._admin_key)
+        return bool(key and secrets.compare_digest(key, self._admin_key))
 
     async def require_admin(self, request: Request):
         """要求管理员权限（作为 FastAPI 依赖项使用，提供独立于中间件的纵深防御）

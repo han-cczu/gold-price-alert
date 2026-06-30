@@ -5,11 +5,17 @@ import httpx
 import re
 from datetime import datetime, timezone
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, TypedDict
 
 from .base import BaseDataSource, PriceData
 
 logger = logging.getLogger(__name__)
+
+
+class BankDefinition(TypedDict):
+    code: str
+    name: str
+    spread: float
 
 
 @dataclass
@@ -34,7 +40,7 @@ class BankGoldDataSource(BaseDataSource):
     """
 
     # 模拟的银行基础金价（基于实时国际金价换算）
-    BANKS = [
+    BANKS: list[BankDefinition] = [
         {"code": "ICBC", "name": "工商银行", "spread": 0.5},
         {"code": "BOC", "name": "中国银行", "spread": 0.6},
         {"code": "CCB", "name": "建设银行", "spread": 0.55},

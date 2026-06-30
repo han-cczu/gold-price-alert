@@ -2,14 +2,18 @@
 
 import logging
 import time
+from types import ModuleType
+from typing import Any, Callable, cast
 
 logger = logging.getLogger(__name__)
 
 # 尝试导入 prometheus_client，如果未安装则使用模拟实现
+_prometheus_client: ModuleType | None
 try:
-    from prometheus_client import Counter, Gauge, Histogram, Info, generate_latest, CONTENT_TYPE_LATEST
+    import prometheus_client as _prometheus_client
     PROMETHEUS_AVAILABLE = True
 except ImportError:
+    _prometheus_client = None
     PROMETHEUS_AVAILABLE = False
     logger.warning("prometheus_client 未安装，指标功能将被禁用")
 
@@ -28,19 +32,25 @@ except ImportError:
         def info(self, *args, **kwargs):
             pass
 
-    def Counter(*args, **kwargs):
+    def _mock_metric_factory(*args: Any, **kwargs: Any) -> MockMetric:
         return MockMetric()
 
-    def Gauge(*args, **kwargs):
-        return MockMetric()
+MetricFactory = Callable[..., Any]
 
-    def Histogram(*args, **kwargs):
-        return MockMetric()
+if _prometheus_client is not None:
+    Counter: MetricFactory = cast(MetricFactory, _prometheus_client.Counter)
+    Gauge: MetricFactory = cast(MetricFactory, _prometheus_client.Gauge)
+    Histogram: MetricFactory = cast(MetricFactory, _prometheus_client.Histogram)
+    Info: MetricFactory = cast(MetricFactory, _prometheus_client.Info)
+    generate_latest: Callable[[], bytes] = cast(Callable[[], bytes], _prometheus_client.generate_latest)
+    CONTENT_TYPE_LATEST = _prometheus_client.CONTENT_TYPE_LATEST
+else:
+    Counter = _mock_metric_factory
+    Gauge = _mock_metric_factory
+    Histogram = _mock_metric_factory
+    Info = _mock_metric_factory
 
-    def Info(*args, **kwargs):
-        return MockMetric()
-
-    def generate_latest():
+    def generate_latest() -> bytes:
         return b"# Prometheus metrics disabled - prometheus_client not installed\n"
 
     CONTENT_TYPE_LATEST = "text/plain"
@@ -77,7 +87,7 @@ PRICE_CHANGE_PERCENT = Gauge(
 ALERT_TOTAL = Counter(
     "gold_alert_total",
     "Total number of alerts triggered",
-    ["type"]  # type: threshold_upper, threshold_lower, volatility, etc.
+    ["type"]  # alert kind: threshold_upper, threshold_lower, volatility, etc.
 )
 
 ALERT_ACTIVE = Gauge(
@@ -108,7 +118,7 @@ WS_CONNECTIONS = Gauge(
 WS_MESSAGES_TOTAL = Counter(
     "gold_websocket_messages_total",
     "Total WebSocket messages sent",
-    ["type"]  # type: price_update, alert, pong
+    ["type"]  # message kind: price_update, alert, pong
 )
 
 # API 指标
@@ -142,7 +152,7 @@ DB_OPERATION_LATENCY = Histogram(
 ANALYSIS_TOTAL = Counter(
     "gold_analysis_total",
     "Total number of AI analyses performed",
-    ["type", "provider"]  # type: volatility, smart; provider: openai, anthropic, etc.
+    ["type", "provider"]  # analysis kind: volatility, smart; provider: openai, anthropic, etc.
 )
 
 ANALYSIS_LATENCY = Histogram(
@@ -169,7 +179,7 @@ def record_fetch(source: str, success: bool, latency_seconds: float):
         FETCH_LATENCY.labels(source=source).observe(latency_seconds)
 
 
-def record_price(price: float, change_percent: float = None):
+def record_price(price: float, change_percent: float | None = None):
     """记录当前价格"""
     CURRENT_PRICE.set(price)
     if change_percent is not None:
@@ -181,7 +191,7 @@ def record_alert(alert_type: str):
     ALERT_TOTAL.labels(type=alert_type).inc()
 
 
-def record_notification(channel: str, success: bool, latency_seconds: float = None):
+def record_notification(channel: str, success: bool, latency_seconds: float | None = None):
     """记录通知发送"""
     status = "success" if success else "failure"
     NOTIFICATION_TOTAL.labels(channel=channel, status=status).inc()

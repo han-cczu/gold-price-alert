@@ -2,10 +2,12 @@
 
 import json
 from datetime import datetime, timezone
-from sqlalchemy import create_engine, Column, Integer, Float, DateTime, String, Text, Boolean, ForeignKey
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import create_engine, Float, DateTime, String, Text, ForeignKey
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    pass
 
 
 def _utcnow():
@@ -17,11 +19,11 @@ class GoldPrice(Base):
     """金价记录表"""
     __tablename__ = "gold_prices"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    price = Column(Float, nullable=False, comment="金价 (USD/oz)")
-    currency = Column(String(10), default="USD", comment="货币单位")
-    source = Column(String(50), comment="数据来源")
-    timestamp = Column(DateTime, default=_utcnow, comment="采集时间")
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    price: Mapped[float] = mapped_column(Float, nullable=False, comment="金价 (USD/oz)")
+    currency: Mapped[str] = mapped_column(String(10), default="USD", comment="货币单位")
+    source: Mapped[str] = mapped_column(String(50), comment="数据来源")
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, comment="采集时间")
 
     def __repr__(self):
         return f"<GoldPrice(id={self.id}, price={self.price}, timestamp={self.timestamp})>"
@@ -31,11 +33,11 @@ class AlertRecord(Base):
     """告警记录表"""
     __tablename__ = "alert_records"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    alert_type = Column(String(50), nullable=False, comment="告警类型: threshold/volatility")
-    price = Column(Float, nullable=False, comment="触发时价格")
-    message = Column(Text, comment="告警消息")
-    triggered_at = Column(DateTime, default=_utcnow, comment="触发时间")
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    alert_type: Mapped[str] = mapped_column(String(50), nullable=False, comment="告警类型: threshold/volatility")
+    price: Mapped[float] = mapped_column(Float, nullable=False, comment="触发时价格")
+    message: Mapped[str] = mapped_column(Text, comment="告警消息")
+    triggered_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, comment="触发时间")
 
     def __repr__(self):
         return f"<AlertRecord(id={self.id}, type={self.alert_type}, price={self.price})>"
@@ -45,13 +47,13 @@ class AlertState(Base):
     """告警状态持久化表 - 用于服务重启后恢复状态"""
     __tablename__ = "alert_states"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    alert_type = Column(String(50), unique=True, nullable=False, comment="告警类型")
-    last_triggered_at = Column(DateTime, nullable=True, comment="上次触发时间")
-    cooldown_until = Column(DateTime, nullable=True, comment="冷却结束时间")
-    base_price = Column(Float, nullable=True, comment="波动计算基准价")
-    window_prices = Column(Text, nullable=True, comment="JSON序列化的价格序列")
-    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow, comment="更新时间")
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    alert_type: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, comment="告警类型")
+    last_triggered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="上次触发时间")
+    cooldown_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="冷却结束时间")
+    base_price: Mapped[float | None] = mapped_column(Float, nullable=True, comment="波动计算基准价")
+    window_prices: Mapped[str | None] = mapped_column(Text, nullable=True, comment="JSON序列化的价格序列")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, comment="更新时间")
 
     def __repr__(self):
         return f"<AlertState(type={self.alert_type}, last_triggered={self.last_triggered_at})>"
@@ -76,13 +78,13 @@ class NotificationLog(Base):
     """通知发送记录表"""
     __tablename__ = "notification_logs"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    alert_id = Column(Integer, ForeignKey("alert_records.id"), nullable=True, comment="关联的告警ID")
-    channel = Column(String(50), nullable=False, comment="通知渠道: email/webhook/telegram")
-    status = Column(String(20), nullable=False, comment="状态: success/failed/pending")
-    error_message = Column(Text, nullable=True, comment="错误信息")
-    retry_count = Column(Integer, default=0, comment="重试次数")
-    sent_at = Column(DateTime, default=_utcnow, comment="发送时间")
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    alert_id: Mapped[int | None] = mapped_column(ForeignKey("alert_records.id"), nullable=True, comment="关联的告警ID")
+    channel: Mapped[str] = mapped_column(String(50), nullable=False, comment="通知渠道: email/webhook/telegram")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, comment="状态: success/failed/pending")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True, comment="错误信息")
+    retry_count: Mapped[int] = mapped_column(default=0, comment="重试次数")
+    sent_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, comment="发送时间")
 
     def __repr__(self):
         return f"<NotificationLog(channel={self.channel}, status={self.status})>"
@@ -92,12 +94,12 @@ class NotificationConfig(Base):
     """通知渠道配置表 - Web可配置"""
     __tablename__ = "notification_configs"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    channel_type = Column(String(50), unique=True, nullable=False, comment="渠道类型: email/webhook/telegram")
-    enabled = Column(Boolean, default=False, comment="是否启用")
-    config = Column(Text, nullable=True, comment="JSON配置（不含敏感密钥）")
-    created_at = Column(DateTime, default=_utcnow, comment="创建时间")
-    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow, comment="更新时间")
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    channel_type: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, comment="渠道类型: email/webhook/telegram")
+    enabled: Mapped[bool] = mapped_column(default=False, comment="是否启用")
+    config: Mapped[str | None] = mapped_column(Text, nullable=True, comment="JSON配置（不含敏感密钥）")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, comment="创建时间")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, comment="更新时间")
 
     def __repr__(self):
         return f"<NotificationConfig(type={self.channel_type}, enabled={self.enabled})>"
@@ -120,15 +122,15 @@ class AnalysisRecord(Base):
     """AI分析记录表 - 分析结果可追溯"""
     __tablename__ = "analysis_records"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    analysis_type = Column(String(50), comment="分析类型: volatility/smart")
-    model_provider = Column(String(50), comment="模型提供商")
-    model_name = Column(String(100), comment="模型名称")
-    price_range_start = Column(DateTime, comment="分析数据起始时间")
-    price_range_end = Column(DateTime, comment="分析数据结束时间")
-    input_summary = Column(Text, comment="输入数据摘要")
-    result = Column(Text, comment="分析结果JSON")
-    created_at = Column(DateTime, default=_utcnow, comment="创建时间")
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    analysis_type: Mapped[str] = mapped_column(String(50), comment="分析类型: volatility/smart")
+    model_provider: Mapped[str | None] = mapped_column(String(50), comment="模型提供商")
+    model_name: Mapped[str | None] = mapped_column(String(100), comment="模型名称")
+    price_range_start: Mapped[datetime | None] = mapped_column(DateTime, comment="分析数据起始时间")
+    price_range_end: Mapped[datetime | None] = mapped_column(DateTime, comment="分析数据结束时间")
+    input_summary: Mapped[str | None] = mapped_column(Text, comment="输入数据摘要")
+    result: Mapped[str | None] = mapped_column(Text, comment="分析结果JSON")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, comment="创建时间")
 
     def __repr__(self):
         return f"<AnalysisRecord(type={self.analysis_type}, created={self.created_at})>"
@@ -205,9 +207,9 @@ class Database:
         with self.get_session() as session:
             return session.query(AlertState).filter(AlertState.alert_type == alert_type).first()
 
-    def save_alert_state(self, alert_type: str, last_triggered_at: datetime = None,
-                         cooldown_until: datetime = None, base_price: float = None,
-                         window_prices: list[tuple[datetime, float]] = None) -> AlertState:
+    def save_alert_state(self, alert_type: str, last_triggered_at: datetime | None = None,
+                         cooldown_until: datetime | None = None, base_price: float | None = None,
+                         window_prices: list[tuple[datetime, float]] | None = None) -> AlertState:
         """保存或更新告警状态"""
         with self.get_session() as session:
             state = session.query(AlertState).filter(AlertState.alert_type == alert_type).first()
@@ -236,8 +238,8 @@ class Database:
 
     # ============ 通知日志 ============
 
-    def save_notification_log(self, channel: str, status: str, alert_id: int = None,
-                              error_message: str = None, retry_count: int = 0) -> NotificationLog:
+    def save_notification_log(self, channel: str, status: str, alert_id: int | None = None,
+                              error_message: str | None = None, retry_count: int = 0) -> NotificationLog:
         """保存通知发送日志"""
         with self.get_session() as session:
             log = NotificationLog(
@@ -252,7 +254,7 @@ class Database:
             session.refresh(log)
             return log
 
-    def get_notification_logs(self, limit: int = 100, channel: str = None) -> list[NotificationLog]:
+    def get_notification_logs(self, limit: int = 100, channel: str | None = None) -> list[NotificationLog]:
         """获取通知日志"""
         with self.get_session() as session:
             query = session.query(NotificationLog)
@@ -269,8 +271,8 @@ class Database:
                 NotificationConfig.channel_type == channel_type
             ).first()
 
-    def save_notification_config(self, channel_type: str, enabled: bool = None,
-                                  config: dict = None) -> NotificationConfig:
+    def save_notification_config(self, channel_type: str, enabled: bool | None = None,
+                                  config: dict | None = None) -> NotificationConfig:
         """保存或更新通知渠道配置"""
         with self.get_session() as session:
             nc = session.query(NotificationConfig).filter(
@@ -297,10 +299,10 @@ class Database:
 
     # ============ 分析记录 ============
 
-    def save_analysis_record(self, analysis_type: str, model_provider: str = None,
-                              model_name: str = None, price_range_start: datetime = None,
-                              price_range_end: datetime = None, input_summary: str = None,
-                              result: dict = None) -> AnalysisRecord:
+    def save_analysis_record(self, analysis_type: str, model_provider: str | None = None,
+                              model_name: str | None = None, price_range_start: datetime | None = None,
+                              price_range_end: datetime | None = None, input_summary: str | None = None,
+                              result: dict | None = None) -> AnalysisRecord:
         """保存分析记录"""
         with self.get_session() as session:
             record = AnalysisRecord(
@@ -318,7 +320,7 @@ class Database:
             session.refresh(record)
             return record
 
-    def get_analysis_records(self, limit: int = 50, analysis_type: str = None) -> list[AnalysisRecord]:
+    def get_analysis_records(self, limit: int = 50, analysis_type: str | None = None) -> list[AnalysisRecord]:
         """获取分析记录"""
         with self.get_session() as session:
             query = session.query(AnalysisRecord)

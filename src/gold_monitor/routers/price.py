@@ -27,7 +27,8 @@ async def get_chart_data(
             source = create_data_source()
             price_data = await source.fetch_price()
             db.save_price(price_data.price, price_data.source)
-            records = [db.get_latest_price()]
+            latest_record = db.get_latest_price()
+            records = [latest_record] if latest_record else []
         except Exception:
             return ChartDataResponse(
                 timestamps=[],

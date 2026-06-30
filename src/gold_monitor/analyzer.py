@@ -150,7 +150,7 @@ class LLMProvider(ABC):
 
     def _parse_smart_response(self, response: str) -> SmartAnalysisReport:
         """解析智能分析响应"""
-        sections = {
+        sections: dict[str, str | list[str]] = {
             "market_overview": "",
             "recent_trend": "",
             "key_factors": [],
@@ -160,8 +160,8 @@ class LLMProvider(ABC):
             "risk_warning": ""
         }
         
-        current_section = None
-        current_content = []
+        current_section: str | None = None
+        current_content: list[str] = []
         
         for line in response.split('\n'):
             line_lower = line.lower()
@@ -222,26 +222,42 @@ class LLMProvider(ABC):
                         factors.append(factor)
             sections["key_factors"] = factors if factors else ["市场供需变化", "宏观经济影响", "地缘政治因素"]
         
+        market_overview = sections["market_overview"]
+        recent_trend = sections["recent_trend"]
+        price_prediction = sections["price_prediction"]
+        buy_timing = sections["buy_timing"]
+        recommendation = sections["recommendation"]
+        risk_warning = sections["risk_warning"]
+
         return SmartAnalysisReport(
             title=f"黄金市场分析报告 - {datetime.now(timezone.utc).strftime('%Y-%m-%d')}",
-            market_overview=sections["market_overview"] or "暂无数据",
-            recent_trend=sections["recent_trend"] or "暂无数据",
+            market_overview=market_overview if isinstance(market_overview, str) and market_overview else "暂无数据",
+            recent_trend=recent_trend if isinstance(recent_trend, str) and recent_trend else "暂无数据",
             key_factors=sections["key_factors"] if isinstance(sections["key_factors"], list) else ["暂无数据"],
-            price_prediction=sections["price_prediction"] or "暂无预测",
-            buy_timing=sections["buy_timing"] or "建议观望",
-            recommendation=sections["recommendation"] or "建议谨慎操作",
-            risk_warning=sections["risk_warning"] or "投资有风险，入市需谨慎",
+            price_prediction=price_prediction if isinstance(price_prediction, str) and price_prediction else "暂无预测",
+            buy_timing=buy_timing if isinstance(buy_timing, str) and buy_timing else "建议观望",
+            recommendation=recommendation if isinstance(recommendation, str) and recommendation else "建议谨慎操作",
+            risk_warning=risk_warning if isinstance(risk_warning, str) and risk_warning else "投资有风险，入市需谨慎",
             generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
             raw_response=response
         )
     
-    def _save_section(self, sections: dict, section: str, content: list):
+    def _save_section(self, sections: dict[str, str | list[str]], section: str, content: list[str]):
         """保存章节内容"""
         text = '\n'.join(content).strip()
         if section == "key_factors":
             sections[section] = text  # 后续会解析为列表
         else:
             sections[section] = text
+
+    @staticmethod
+    def _first_text_block(blocks: list[Any]) -> str:
+        """从 LLM 响应块中提取第一个文本块。"""
+        for block in blocks:
+            text = getattr(block, "text", None)
+            if isinstance(text, str):
+                return text
+        return ""
 
     def _build_prompt(self, context: AnalysisContext) -> str:
         """构建分析提示词"""
@@ -349,7 +365,7 @@ class AnthropicProvider(LLMProvider):
             max_tokens=2048,
             messages=[{"role": "user", "content": prompt}]
         )
-        return message.content[0].text
+        return self._first_text_block(list(message.content))
 
     def supports_web_search(self) -> bool:
         return True
@@ -443,7 +459,7 @@ class OpenAIProvider(LLMProvider):
             ],
             max_tokens=2048
         )
-        return response.choices[0].message.content
+        return response.choices[0].message.content or ""
 
     def supports_web_search(self) -> bool:
         # 配了 Tavily → 任意兼容接口（含 DeepSeek）均可通过 function-calling 联网

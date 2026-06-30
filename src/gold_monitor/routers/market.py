@@ -1,6 +1,7 @@
 """行情换算相关路由：/api/exchange-rate、/api/bank-prices、/api/convert"""
 
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Query
 
@@ -81,10 +82,10 @@ async def get_bank_prices():
 @router.get("/api/convert")
 async def convert_gold_price(
     price: float = Query(..., description="价格"),
-    from_unit: str = Query(default="oz", description="原单位: oz, g, kg"),
-    to_unit: str = Query(default="g", description="目标单位: oz, g, kg"),
-    from_currency: str = Query(default="USD", description="原币种: USD, CNY"),
-    to_currency: str = Query(default="CNY", description="目标币种: USD, CNY")
+    from_unit: Literal["oz", "g", "kg"] = Query(default="oz", description="原单位: oz, g, kg"),
+    to_unit: Literal["oz", "g", "kg"] = Query(default="g", description="目标单位: oz, g, kg"),
+    from_currency: Literal["USD", "CNY"] = Query(default="USD", description="原币种: USD, CNY"),
+    to_currency: Literal["USD", "CNY"] = Query(default="CNY", description="目标币种: USD, CNY")
 ):
     """金价单位和币种换算"""
     # 单位换算系数（相对于盎司）
@@ -95,7 +96,7 @@ async def convert_gold_price(
     }
 
     # 获取汇率
-    usd_cny = _exchange_rate_cache.get("usd_cny", 7.2)
+    usd_cny = _exchange_rate_cache.get("usd_cny") or 7.2
     currency_rates = {
         ("USD", "CNY"): usd_cny,
         ("CNY", "USD"): 1 / usd_cny,

@@ -11,6 +11,19 @@ from ..state import db, require_admin_dep
 router = APIRouter()
 
 
+def _parse_iso_datetime(value: Optional[str], field_name: str) -> Optional[datetime]:
+    """解析可选 ISO 时间参数，非法输入返回明确的 400。"""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field_name} 必须是有效的 ISO 时间格式"
+        ) from exc
+
+
 @router.get("/api/data/stats")
 async def get_data_stats():
     """获取数据统计信息"""
@@ -32,8 +45,8 @@ async def export_data(
     if not manager:
         raise HTTPException(status_code=500, detail="生命周期管理器未初始化")
 
-    start_dt = datetime.fromisoformat(start) if start else None
-    end_dt = datetime.fromisoformat(end) if end else None
+    start_dt = _parse_iso_datetime(start, "start")
+    end_dt = _parse_iso_datetime(end, "end")
 
     if format.lower() == "csv":
         content = await manager.export_csv(start=start_dt, end=end_dt, limit=limit)

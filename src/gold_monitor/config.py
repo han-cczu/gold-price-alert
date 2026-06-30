@@ -1,7 +1,7 @@
 """配置管理模块"""
 
-from pydantic_settings import BaseSettings
-from pydantic import Field, ConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
 
 
 class Settings(BaseSettings):
@@ -91,7 +91,7 @@ class Settings(BaseSettings):
     backup_enabled: bool = Field(default=False, description="是否启用自动备份")
     backup_path: str = Field(default="./backups", description="备份文件路径")
 
-    model_config = ConfigDict(env_prefix="GOLD_", env_file=".env")
+    model_config = SettingsConfigDict(env_prefix="GOLD_", env_file=".env")
 
 
 settings = Settings()

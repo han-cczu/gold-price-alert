@@ -171,6 +171,7 @@ ws_manager = ConnectionManager()
 async def on_price_update(price_data: PriceData):
     """价格更新回调 - 检查告警 + WebSocket 广播 + 记录指标"""
     global _alerts_buffer
+    assert price_data.timestamp is not None
 
     # 记录 Prometheus 指标
     record_price(price_data.price)
@@ -246,27 +247,29 @@ async def _run_smart_analysis(model: Optional[str] = None) -> dict:
             if not active_provider or active_provider.id == "mock" or not active_provider.api_key:
                 # Mock 模式
                 from .analyzer import MockLLMProvider
-                provider = MockLLMProvider()
-                report = await provider.smart_analyze()
+                mock_provider = MockLLMProvider()
+                report = await mock_provider.smart_analyze()
                 model_used = "Mock"
             else:
                 # 真实 API 调用
-                from .analyzer import OpenAIProvider, AnthropicProvider
+                from .analyzer import LLMProvider, OpenAIProvider, AnthropicProvider
 
+                provider: LLMProvider
                 if "anthropic" in (active_provider.base_url or "").lower() or "claude" in (active_provider.name or "").lower():
                     provider = AnthropicProvider(
                         api_key=active_provider.api_key,
                         model=use_model
                     )
+                    model_used = use_model or provider.model
                 else:
                     provider = OpenAIProvider(
                         api_key=active_provider.api_key,
                         base_url=active_provider.base_url,
                         model=use_model
                     )
+                    model_used = use_model or provider.model
 
                 report = await provider.smart_analyze()
-                model_used = use_model or provider.model
 
             _smart_analysis_cache = {
                 "title": report.title,

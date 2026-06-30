@@ -9,12 +9,27 @@ import os
 import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TypedDict
 
 from .config import settings
 from .models import Database
 
 logger = logging.getLogger(__name__)
+
+
+class BackupResult(TypedDict, total=False):
+    success: bool
+    backup_path: str | None
+    size_bytes: int
+    backup_time: str
+    error: str
+
+
+class BackupInfo(TypedDict):
+    name: str
+    path: str
+    size_bytes: int
+    created_at: str
 
 
 class DataLifecycleManager:
@@ -23,10 +38,10 @@ class DataLifecycleManager:
     def __init__(
         self,
         database: Database,
-        retention_days: int = None,
-        hourly_aggregation_days: int = None,
-        daily_aggregation_days: int = None,
-        backup_path: str = None
+        retention_days: int | None = None,
+        hourly_aggregation_days: int | None = None,
+        daily_aggregation_days: int | None = None,
+        backup_path: str | None = None
     ):
         self._db = database
         self._retention_days = retention_days or settings.data_retention_days
@@ -86,8 +101,8 @@ class DataLifecycleManager:
 
     async def export_csv(
         self,
-        start: datetime = None,
-        end: datetime = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
         limit: int = 10000
     ) -> str:
         """导出数据为 CSV 格式
@@ -131,8 +146,8 @@ class DataLifecycleManager:
 
     async def export_json(
         self,
-        start: datetime = None,
-        end: datetime = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
         limit: int = 10000
     ) -> str:
         """导出数据为 JSON 格式
@@ -175,7 +190,7 @@ class DataLifecycleManager:
 
     # ============ 数据备份 ============
 
-    async def backup_database(self, backup_name: str = None) -> dict:
+    async def backup_database(self, backup_name: str | None = None) -> BackupResult:
         """备份数据库
         
         Args:
@@ -184,7 +199,7 @@ class DataLifecycleManager:
         Returns:
             {"success": bool, "backup_path": str, "size_bytes": int}
         """
-        result = {
+        result: BackupResult = {
             "success": False,
             "backup_path": None,
             "size_bytes": 0,
@@ -209,9 +224,10 @@ class DataLifecycleManager:
                     shutil.copy2(db_path, backup_file)
                     result["success"] = True
                     result["backup_path"] = str(backup_file)
-                    result["size_bytes"] = os.path.getsize(backup_file)
+                    size_bytes = os.path.getsize(backup_file)
+                    result["size_bytes"] = size_bytes
                     logger.info("数据库备份完成: %s (%.2f MB)",
-                                backup_file, result["size_bytes"] / 1024 / 1024)
+                                backup_file, size_bytes / 1024 / 1024)
                 else:
                     result["error"] = f"数据库文件不存在: {db_path}"
             else:
@@ -233,9 +249,9 @@ class DataLifecycleManager:
 
         return result
 
-    async def list_backups(self) -> list[dict]:
+    async def list_backups(self) -> list[BackupInfo]:
         """列出所有备份文件"""
-        backups = []
+        backups: list[BackupInfo] = []
 
         try:
             if not self._backup_path.exists():
@@ -343,7 +359,7 @@ def stop_cleanup_scheduler():
 _lifecycle_manager: Optional[DataLifecycleManager] = None
 
 
-def get_lifecycle_manager(database: Database = None) -> Optional[DataLifecycleManager]:
+def get_lifecycle_manager(database: Database | None = None) -> Optional[DataLifecycleManager]:
     """获取全局生命周期管理器"""
     global _lifecycle_manager
     if _lifecycle_manager is None and database:

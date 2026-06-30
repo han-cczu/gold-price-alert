@@ -52,17 +52,20 @@ class ConsoleNotification(NotificationChannel):
         from rich.console import Console
         from rich.panel import Panel
 
-        console = Console()
+        console = Console(safe_box=True)
         style = "red" if alert.alert_type in [AlertType.THRESHOLD_UPPER, AlertType.VOLATILITY] else "yellow"
 
         panel = Panel(
             f"[bold]{alert.message}[/bold]\n\n"
             f"当前价格: ${alert.price:.2f}\n"
             f"时间: {alert.triggered_at.strftime('%Y-%m-%d %H:%M:%S')}",
-            title=f"⚠️ {alert.alert_type.value.upper()}",
+            title=f"ALERT {alert.alert_type.value.upper()}",
             border_style=style
         )
-        console.print(panel)
+        try:
+            console.print(panel)
+        except UnicodeEncodeError as e:
+            logger.warning("控制台编码不支持告警内容，跳过控制台渲染: %s", e)
         return True
 
 
@@ -119,6 +122,7 @@ class WebhookNotification(NotificationChannel):
         import aiohttp
 
         try:
+            payload: dict[str, object]
             if self.webhook_type == "dingtalk":
                 payload = {
                     "msgtype": "text",
@@ -333,7 +337,7 @@ class VolatilityDetector:
 class NotificationManager:
     """通知管理器 - 统一管理所有渠道，支持重试"""
 
-    def __init__(self, database: Database, channels: list[NotificationChannel] = None):
+    def __init__(self, database: Database, channels: list[NotificationChannel] | None = None):
         self._db = database
         self._channels = channels or []
         self._max_retries = 3
@@ -346,7 +350,7 @@ class NotificationManager:
         """添加通知渠道"""
         self._channels.append(channel)
 
-    async def send_with_retry(self, alert: Alert, alert_record_id: int = None) -> dict[str, bool]:
+    async def send_with_retry(self, alert: Alert, alert_record_id: int | None = None) -> dict[str, bool]:
         """发送通知到所有渠道，支持重试
         
         返回: {channel_name: success}
@@ -522,7 +526,7 @@ class AlertMonitor:
             cooldown_until=alert.triggered_at + self._alert_cooldown
         )
 
-        return record.id
+        return int(record.id)
 
     def _dispatch_notification(self, alert: Alert, record_id: int | None = None):
         """后台分发通知，避免通知重试/退避阻塞采集循环"""
@@ -569,6 +573,7 @@ class AlertMonitor:
         alerts = []
         alert_ids: list[int] = []  # 与 alerts 一一对应的告警记录ID
         now = price_data.timestamp
+        assert now is not None
         price = price_data.price
 
         # 更新价格历史
@@ -661,7 +666,7 @@ class AlertMonitor:
                 AlertRecord.triggered_at.desc()
             ).limit(limit).all()
 
-    def get_notification_logs(self, limit: int = 100, channel: str = None) -> list:
+    def get_notification_logs(self, limit: int = 100, channel: str | None = None) -> list:
         """获取通知发送日志"""
         return self._db.get_notification_logs(limit=limit, channel=channel)
 

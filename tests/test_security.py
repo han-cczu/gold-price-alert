@@ -5,6 +5,8 @@ from fastapi import HTTPException
 
 from gold_monitor.config import settings
 from gold_monitor.security import SecretManager, APIKeyAuth, is_admin_path
+from gold_monitor.state import require_admin_dep
+from gold_monitor.web import app
 
 
 # ============ Fernet 加密 ============
@@ -34,6 +36,16 @@ def test_decrypt_with_wrong_key_returns_empty():
     assert SecretManager(secret_key="key-b").decrypt(ct) == ""
 
 
+def test_secret_manager_defaults_to_settings_secret_key(monkeypatch):
+    """从 .env 加载到 settings 的 GOLD_SECRET_KEY 应作为默认主密钥。"""
+    monkeypatch.delenv("GOLD_SECRET_KEY", raising=False)
+    monkeypatch.setattr(settings, "secret_key", "settings-secret")
+
+    ciphertext = SecretManager().encrypt("stored-key")
+
+    assert SecretManager(secret_key="settings-secret").decrypt(ciphertext) == "stored-key"
+
+
 # ============ 管理路径覆盖 ============
 
 def test_admin_paths_cover_previously_missed_endpoints():
@@ -44,6 +56,16 @@ def test_admin_paths_cover_previously_missed_endpoints():
     assert is_admin_path("/api/llm/providers")
     assert not is_admin_path("/api/price/current")
     assert not is_admin_path("/health")
+
+
+def test_api_key_auth_defaults_to_settings_admin_key(monkeypatch):
+    """从 .env 加载到 settings 的 GOLD_ADMIN_API_KEY 应作为默认管理密钥。"""
+    monkeypatch.delenv("GOLD_ADMIN_API_KEY", raising=False)
+    monkeypatch.setattr(settings, "admin_api_key", "settings-admin")
+
+    auth = APIKeyAuth()
+
+    assert auth.admin_key == "settings-admin"
 
 
 # ============ require_admin 鉴权 ============
@@ -86,3 +108,19 @@ async def test_require_admin_enabled_rejects_wrong_key(monkeypatch):
     req = FakeRequest(headers={"X-Admin-Key": "wrong"})
     with pytest.raises(HTTPException):
         await auth.require_admin(req)
+
+
+def test_llm_write_endpoints_have_route_level_admin_dependency():
+    """LLM 写接口应由路由依赖自身保护，不只依赖中间件前缀。"""
+    write_methods = {"POST", "PUT", "PATCH", "DELETE"}
+    llm_write_routes = [
+        route for route in app.routes
+        if getattr(route, "path", "").startswith("/api/llm")
+        and write_methods.intersection(getattr(route, "methods", set()))
+    ]
+
+    assert llm_write_routes
+    for route in llm_write_routes:
+        dependencies = getattr(route, "dependant").dependencies
+        dependency_calls = {dependency.call for dependency in dependencies}
+        assert require_admin_dep in dependency_calls, route.path

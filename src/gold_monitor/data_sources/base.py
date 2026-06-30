@@ -10,7 +10,7 @@ class PriceData:
     """金价数据结构"""
     price: float  # 价格 (USD/oz)
     currency: str = "USD"
-    timestamp: datetime = None
+    timestamp: datetime | None = None
     source: str = "unknown"
 
     def __post_init__(self):

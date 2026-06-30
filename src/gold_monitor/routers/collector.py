@@ -47,7 +47,7 @@ async def update_collector_config(
     if not collector:
         raise HTTPException(status_code=503, detail="采集器未运行")
 
-    changes = {}
+    changes: dict[str, int | str] = {}
 
     if interval is not None:
         collector.set_interval(interval)

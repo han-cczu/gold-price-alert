@@ -127,11 +127,11 @@ async def lifespan(app: FastAPI):
     logger.info("金价监控系统关闭")
 
     # 强制持久化告警状态
-    alert_monitor = get_alert_monitor()
-    if alert_monitor:
-        alert_monitor.force_persist()
+    active_alert_monitor = get_alert_monitor()
+    if active_alert_monitor:
+        active_alert_monitor.force_persist()
         # 等待后台通知任务完成，避免关停时丢失正在发送的通知
-        await alert_monitor.wait_pending_notifications()
+        await active_alert_monitor.wait_pending_notifications()
 
     # 停止定时清理任务
     stop_cleanup_scheduler()
@@ -145,9 +145,9 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
 
-    collector = get_collector()
-    if collector:
-        await collector.stop()
+    active_collector = get_collector()
+    if active_collector:
+        await active_collector.stop()
 
 
 app = FastAPI(

@@ -7,6 +7,7 @@
 """
 
 import asyncio
+from collections.abc import Awaitable
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -31,7 +32,7 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def create_data_source(source_type: str = None) -> BaseDataSource:
+def create_data_source(source_type: str | None = None) -> BaseDataSource:
     """创建数据源实例"""
     source_type = source_type or settings.data_source
 
@@ -257,7 +258,7 @@ class AdvancedCollector:
         self,
         database: Database,
         strategy: FetchStrategy = FetchStrategy.PARALLEL_FIRST,
-        on_price_update: Callable[[PriceData], None] = None,
+        on_price_update: Callable[[PriceData], Awaitable[None] | None] | None = None,
         deduplicate: bool = True,
         dedupe_threshold: float = 0.01,
         gap_detection: bool = True,
@@ -640,10 +641,12 @@ class AdvancedCollector:
         if len(records) < 2:
             return []
 
-        gaps = []
+        gaps: list[tuple[datetime, datetime]] = []
         for i in range(1, len(records)):
             prev_time = records[i - 1].timestamp
             curr_time = records[i].timestamp
+            assert isinstance(prev_time, datetime)
+            assert isinstance(curr_time, datetime)
             gap = curr_time - prev_time
 
             if gap > self._gap_threshold:
@@ -722,7 +725,7 @@ class AdvancedCollector:
 
     # ============ 启停控制 ============
 
-    def start(self, interval: int = None):
+    def start(self, interval: int | None = None):
         """启动定时采集"""
         if self._running:
             logger.warning("采集器已在运行")
@@ -749,7 +752,7 @@ class AdvancedCollector:
         await self._close_sources()
         logger.info("数据采集已停止")
 
-    async def restart(self, interval: int = None):
+    async def restart(self, interval: int | None = None):
         """重启采集器"""
         await self.stop()
         self.start(interval)

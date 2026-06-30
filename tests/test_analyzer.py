@@ -401,3 +401,30 @@ async def test_mock_provider_response():
     assert "上涨" in report.summary  # price_change > 0
     assert len(report.possible_reasons) == 5
     assert report.raw_response == "[Mock Response]"
+
+
+@pytest.mark.asyncio
+async def test_anthropic_provider_uses_first_text_block(monkeypatch):
+    """Anthropic 响应可能包含非文本块，应提取第一个文本块。"""
+    from gold_monitor.analyzer import AnthropicProvider
+
+    class _BlockWithoutText:
+        pass
+
+    class _TextBlock:
+        text = "文本结果"
+
+    class _Messages:
+        async def create(self, **kwargs):
+            return type("Message", (), {"content": [_BlockWithoutText(), _TextBlock()]})()
+
+    class _Client:
+        def __init__(self, **kwargs):
+            self.messages = _Messages()
+
+    import anthropic
+
+    monkeypatch.setattr(anthropic, "AsyncAnthropic", _Client)
+    provider = AnthropicProvider(api_key="k")
+
+    assert await provider._call_llm("prompt") == "文本结果"

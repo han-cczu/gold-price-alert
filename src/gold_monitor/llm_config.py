@@ -6,7 +6,7 @@ import os
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -24,13 +24,13 @@ class ModelProvider:
     name: str = ""  # 显示名称，如 "DeepSeek", "OpenAI"
     base_url: str = ""  # API 地址
     api_key: str = ""  # API Key
-    models: list = field(default_factory=list)  # 已获取的模型列表缓存
+    models: list[str] = field(default_factory=list)  # 已获取的模型列表缓存
     
     def __post_init__(self):
         if not self.id:
             self.id = str(uuid.uuid4())[:8]
     
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -39,7 +39,7 @@ class ModelProvider:
             "models": self.models
         }
     
-    def to_safe_dict(self) -> dict:
+    def to_safe_dict(self) -> dict[str, Any]:
         """返回脱敏的配置"""
         return {
             "id": self.id,
@@ -61,23 +61,22 @@ class ModelProvider:
 @dataclass
 class LLMConfig:
     """LLM 总配置"""
-    providers: list = field(default_factory=list)  # 模型服务平台列表
+    providers: list[ModelProvider] = field(default_factory=list)  # 模型服务平台列表
     active_provider_id: str = ""  # 当前使用的平台 ID
     active_model: str = ""  # 当前使用的模型
     
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
-            "providers": [p.to_dict() if isinstance(p, ModelProvider) else p for p in self.providers],
+            "providers": [p.to_dict() for p in self.providers],
             "active_provider_id": self.active_provider_id,
             "active_model": self.active_model
         }
     
-    def to_safe_dict(self) -> dict:
+    def to_safe_dict(self) -> dict[str, Any]:
         """返回脱敏的配置"""
         return {
             "providers": [
-                p.to_safe_dict() if isinstance(p, ModelProvider) else ModelProvider(**p).to_safe_dict() 
-                for p in self.providers
+                p.to_safe_dict() for p in self.providers
             ],
             "active_provider_id": self.active_provider_id,
             "active_model": self.active_model
@@ -85,8 +84,7 @@ class LLMConfig:
     
     def get_active_provider(self) -> Optional[ModelProvider]:
         """获取当前激活的平台"""
-        for p in self.providers:
-            provider = p if isinstance(p, ModelProvider) else ModelProvider(**p)
+        for provider in self.providers:
             if provider.id == self.active_provider_id:
                 return provider
         return None
@@ -95,7 +93,7 @@ class LLMConfig:
 class LLMConfigManager:
     """LLM 配置管理器"""
     
-    def __init__(self, config_path: Optional[Path] = None, encrypt_keys: bool = None):
+    def __init__(self, config_path: Optional[Path] = None, encrypt_keys: bool | None = None):
         self.config_path = config_path or CONFIG_FILE
         self._config: Optional[LLMConfig] = None
         self._encrypt_keys = encrypt_keys if encrypt_keys is not None else ENCRYPT_API_KEYS
@@ -138,7 +136,7 @@ class LLMConfigManager:
                 data = json.load(f)
                 
                 # 转换 providers 为 ModelProvider 对象，并解密 API Key
-                providers = []
+                providers: list[ModelProvider] = []
                 for p in data.get("providers", []):
                     # 解密 API Key
                     if "api_key" in p:
@@ -198,15 +196,14 @@ class LLMConfigManager:
         """保存配置到文件"""
         try:
             # 准备保存的数据，加密 API Key
-            data = {
+            data: dict[str, Any] = {
                 "active_provider_id": config.active_provider_id,
                 "active_model": config.active_model,
                 "providers": []
             }
             
             for p in config.providers:
-                provider = p if isinstance(p, ModelProvider) else ModelProvider(**p)
-                provider_dict = provider.to_dict()
+                provider_dict = p.to_dict()
                 # 加密 API Key
                 if provider_dict.get("api_key"):
                     provider_dict["api_key"] = self._encrypt_api_key(provider_dict["api_key"])
@@ -233,8 +230,7 @@ class LLMConfigManager:
     def update_provider(self, provider_id: str, **kwargs) -> Optional[ModelProvider]:
         """更新平台配置"""
         config = self.get_config()
-        for i, p in enumerate(config.providers):
-            provider = p if isinstance(p, ModelProvider) else ModelProvider(**p)
+        for i, provider in enumerate(config.providers):
             if provider.id == provider_id:
                 # 更新字段
                 for key, value in kwargs.items():
@@ -251,13 +247,13 @@ class LLMConfigManager:
         original_len = len(config.providers)
         config.providers = [
             p for p in config.providers 
-            if (p.id if isinstance(p, ModelProvider) else p.get("id")) != provider_id
+            if p.id != provider_id
         ]
         if len(config.providers) < original_len:
             # 如果删除的是当前激活的平台，切换到第一个
             if config.active_provider_id == provider_id and config.providers:
                 first = config.providers[0]
-                config.active_provider_id = first.id if isinstance(first, ModelProvider) else first.get("id")
+                config.active_provider_id = first.id
             self.save_config(config)
             return True
         return False
@@ -267,9 +263,8 @@ class LLMConfigManager:
         config = self.get_config()
         # 验证 provider 存在
         found = False
-        for p in config.providers:
-            pid = p.id if isinstance(p, ModelProvider) else p.get("id")
-            if pid == provider_id:
+        for provider in config.providers:
+            if provider.id == provider_id:
                 found = True
                 break
         
@@ -285,8 +280,7 @@ class LLMConfigManager:
     def get_provider(self, provider_id: str) -> Optional[ModelProvider]:
         """获取指定平台"""
         config = self.get_config()
-        for p in config.providers:
-            provider = p if isinstance(p, ModelProvider) else ModelProvider(**p)
+        for provider in config.providers:
             if provider.id == provider_id:
                 return provider
         return None

@@ -127,6 +127,48 @@ def test_get_exchange_rate(client):
     assert data["usd_cny"] > 0
 
 
+def test_get_bank_prices(client):
+    """测试获取银行金价"""
+    response = client.get("/api/bank-prices")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["base_price_cny"] > 0
+    assert data["london_gold_cny"] > 0
+    assert len(data["data"]) >= 1
+    first = data["data"][0]
+    assert first["bank_name"]
+    assert first["buy_price"] < first["sell_price"]
+
+
+def test_convert_gold_price_validates_units(client):
+    """未知单位不应静默按默认系数换算"""
+    response = client.get("/api/convert?price=1&from_unit=bad&to_unit=g")
+    assert response.status_code == 422
+
+
+def test_convert_gold_price_validates_currencies(client):
+    """未知币种不应静默按 1.0 汇率换算"""
+    response = client.get("/api/convert?price=1&from_currency=EUR&to_currency=CNY")
+    assert response.status_code == 422
+
+
+def test_convert_gold_price_per_ounce_to_per_gram(client):
+    """按单位价格换算：USD/oz -> USD/g"""
+    response = client.get(
+        "/api/convert?price=3110.35&from_unit=oz&to_unit=g"
+        "&from_currency=USD&to_currency=USD"
+    )
+    assert response.status_code == 200
+    assert response.json()["converted"]["price"] == 100.0
+
+
+def test_export_data_rejects_invalid_datetime(client):
+    """非法 ISO 时间应返回 400，而不是内部异常"""
+    response = client.get("/api/data/export?start=not-a-date")
+    assert response.status_code == 400
+    assert "ISO" in response.json()["detail"]
+
+
 def test_websocket_status(client):
     """测试 WebSocket 状态"""
     response = client.get("/ws/status")

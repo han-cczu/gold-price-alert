@@ -33,6 +33,7 @@ async def websocket_endpoint(websocket: WebSocket):
     # 连接成功后发送当前价格
     collector = get_collector()
     if collector and collector.last_price:
+        assert collector.last_price.timestamp is not None
         await websocket.send_json({
             "type": "price_update",
             "data": {

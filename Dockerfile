@@ -12,19 +12,7 @@ COPY pyproject.toml .
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir \
-    sqlalchemy>=2.0 \
-    apscheduler>=3.10 \
-    rich>=13.0 \
-    httpx>=0.25 \
-    pydantic>=2.0 \
-    pydantic-settings>=2.0 \
-    aiohttp>=3.9 \
-    anthropic>=0.18 \
-    openai>=1.10 \
-    fastapi>=0.109 \
-    uvicorn>=0.27
+RUN pip install --no-cache-dir --upgrade pip
 
 COPY src/ src/
 COPY README.md .
