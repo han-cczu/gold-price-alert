@@ -7,9 +7,10 @@ from fastapi import APIRouter, Response, WebSocket, WebSocketDisconnect
 
 from ..config import settings
 from ..collector import create_data_source, get_collector
+from ..data_sources.base import close_data_source
 from ..llm_config import get_llm_config_manager
 from ..schemas import HealthResponse
-from ..state import db, ws_manager, get_auth, get_app_start_time
+from ..state import db, ws_manager, get_app_start_time
 from ..metrics import get_metrics, get_metrics_content_type, update_db_records
 
 router = APIRouter()
@@ -75,7 +76,10 @@ async def health_check():
     data_source_healthy = False
     try:
         source = create_data_source()
-        data_source_healthy = await source.health_check()
+        try:
+            data_source_healthy = await source.health_check()
+        finally:
+            await close_data_source(source)
     except Exception:
         data_source_healthy = False
 
@@ -152,10 +156,8 @@ async def prometheus_metrics():
 @router.get("/api/security/status")
 async def get_security_status():
     """获取安全配置状态"""
-    auth = get_auth()
     return {
         "auth_enabled": settings.enable_auth,
         "rate_limit_per_minute": settings.rate_limit_per_minute,
         "admin_key_configured": bool(settings.admin_api_key),
-        "admin_key_hint": auth.admin_key[:8] + "..." if auth.admin_key else None,
     }

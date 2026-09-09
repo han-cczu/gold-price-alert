@@ -5,11 +5,13 @@ from fastapi.testclient import TestClient
 
 # 设置测试环境变量
 import os
+
 os.environ["GOLD_DATA_SOURCE"] = "mock"
 os.environ["GOLD_LLM_PROVIDER"] = "mock"
 os.environ["GOLD_DATABASE_URL"] = "sqlite:///test_web.db"
 
 from gold_monitor.web import app, db
+from gold_monitor.data_sources.base import PriceData
 
 
 @pytest.fixture(scope="module")
@@ -27,6 +29,11 @@ def test_root_page(client):
     response = client.get("/")
     assert response.status_code == 200
     assert "金价实时监控系统" in response.text
+
+
+def test_web_tests_use_isolated_test_database():
+    """Web 测试必须使用测试库，不能污染本地运行库。"""
+    assert "test_web.db" in str(db.engine.url)
 
 
 def test_health_check(client):
@@ -51,6 +58,27 @@ def test_get_current_price(client):
     assert "source" in data
     assert "timestamp" in data
     assert data["price"] > 0
+
+
+def test_get_current_price_closes_temporary_data_source(client, monkeypatch):
+    """一次性创建的数据源在请求结束后必须关闭。"""
+    from gold_monitor.routers import price as price_router
+
+    closed = {"value": False}
+
+    class FakeSource:
+        async def fetch_price(self):
+            return PriceData(price=2000.0, source="fake")
+
+        async def close(self):
+            closed["value"] = True
+
+    monkeypatch.setattr(price_router, "create_data_source", lambda: FakeSource())
+
+    response = client.get("/api/price/current")
+
+    assert response.status_code == 200
+    assert closed["value"] is True
 
 
 def test_get_latest_price(client):
@@ -182,16 +210,16 @@ def test_websocket_status(client):
 def test_websocket_connection(client):
     """测试 WebSocket 连接"""
     import json
-    
+
     with client.websocket_connect("/ws") as websocket:
         # 连接后应收到当前价格
         # 发送心跳
         websocket.send_text(json.dumps({"type": "ping"}))
-        
+
         # 等待心跳响应
         data = websocket.receive_text()
         message = json.loads(data)
-        
+
         # 可能先收到价格更新，也可能收到 pong
         assert message["type"] in ["pong", "price_update"]
 

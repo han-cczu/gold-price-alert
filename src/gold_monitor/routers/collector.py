@@ -1,9 +1,9 @@
 """采集器相关路由：/api/collector/*"""
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..collector import FetchStrategy, get_collector
-from ..state import ws_manager
+from ..state import require_admin_dep, ws_manager
 
 router = APIRouter()
 
@@ -30,7 +30,7 @@ async def get_collector_stats():
 
 
 @router.get("/api/collector/config")
-async def get_collector_config():
+async def get_collector_config(_admin: bool = Depends(require_admin_dep)):
     """获取采集器当前配置"""
     collector = get_collector()
     if not collector:
@@ -45,6 +45,7 @@ async def update_collector_config(
     strategy: str = Query(
         None, description="采集策略: single, fallback, parallel_first, parallel_vote"
     ),
+    _admin: bool = Depends(require_admin_dep),
 ):
     """运行时修改采集器配置"""
     collector = get_collector()
@@ -82,7 +83,10 @@ async def update_collector_config(
 
 
 @router.post("/api/collector/fill-gaps")
-async def fill_data_gaps(hours: int = Query(24, ge=1, le=168)):
+async def fill_data_gaps(
+    hours: int = Query(24, ge=1, le=168),
+    _admin: bool = Depends(require_admin_dep),
+):
     """检测数据间隙并采集当前样本以接续序列
 
     注意：数据源仅提供当前现货价，无法回填历史时刻的真实价格，

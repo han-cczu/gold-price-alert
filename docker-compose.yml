@@ -32,6 +32,8 @@ services:
       - GOLD_ANTHROPIC_API_KEY=${GOLD_ANTHROPIC_API_KEY:-}
       - GOLD_OPENAI_API_KEY=${GOLD_OPENAI_API_KEY:-}
       - GOLD_OPENAI_BASE_URL=${GOLD_OPENAI_BASE_URL:-}
+      - GOLD_TAVILY_API_KEY=${GOLD_TAVILY_API_KEY:-}
+      - GOLD_LLM_CONFIG_PATH=${GOLD_LLM_CONFIG_PATH:-/app/data/llm_config.json}
       
       # 通知（可选）
       - GOLD_SMTP_HOST=${GOLD_SMTP_HOST:-}
@@ -43,6 +45,14 @@ services:
       - GOLD_WEBHOOK_TYPE=${GOLD_WEBHOOK_TYPE:-generic}
       - GOLD_TELEGRAM_BOT_TOKEN=${GOLD_TELEGRAM_BOT_TOKEN:-}
       - GOLD_TELEGRAM_CHAT_ID=${GOLD_TELEGRAM_CHAT_ID:-}
+
+      # 安全
+      - GOLD_ENABLE_AUTH=${GOLD_ENABLE_AUTH:-true}
+      - GOLD_ADMIN_API_KEY=${GOLD_ADMIN_API_KEY:-}
+      - GOLD_SECRET_KEY=${GOLD_SECRET_KEY:-}
+      - GOLD_ENCRYPT_API_KEYS=${GOLD_ENCRYPT_API_KEYS:-true}
+      - GOLD_CORS_ALLOW_ORIGINS=${GOLD_CORS_ALLOW_ORIGINS:-}
+      - GOLD_RATE_LIMIT_PER_MINUTE=${GOLD_RATE_LIMIT_PER_MINUTE:-60}
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
       interval: 30s

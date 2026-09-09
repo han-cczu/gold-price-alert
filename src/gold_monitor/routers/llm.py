@@ -14,7 +14,7 @@ from ..schemas import (
 )
 from ..state import require_admin_dep
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_admin_dep)])
 
 
 def _resolve_credentials(provider, req_api_key, req_base_url):

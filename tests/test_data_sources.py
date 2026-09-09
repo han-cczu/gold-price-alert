@@ -50,7 +50,9 @@ async def test_mock_data_source_volatility():
 @pytest.mark.asyncio
 async def test_fallback_switches_to_healthy_source():
     """主源失败时自动切换到备用源"""
-    fallback = FallbackDataSource([_AlwaysFail("primary"), MockDataSource(base_price=2000.0)])
+    fallback = FallbackDataSource(
+        [_AlwaysFail("primary"), MockDataSource(base_price=2000.0)]
+    )
 
     data = await fallback.fetch_price()
 

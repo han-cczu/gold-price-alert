@@ -6,6 +6,7 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
             body {
@@ -1127,11 +1128,21 @@
                         if (status.enabled) {
                             statusBar.style.background = 'rgba(76, 175, 80, 0.3)';
                             icon.style.color = '#4CAF50';
-                            text.innerHTML = `AI 已启用: <strong>${status.provider_name}</strong> - ${status.model}`;
+                            text.textContent = `AI 已启用: ${status.provider_name} - ${status.model}`;
                         } else {
                             statusBar.style.background = 'rgba(255, 152, 0, 0.3)';
                             icon.style.color = '#ff9800';
-                            text.innerHTML = `${status.message} <a href="#" onclick="openSettings(); return false;" style="color:#fff; text-decoration:underline;">去配置</a>`;
+                            text.textContent = `${status.message} `;
+                            const settingsLink = document.createElement('a');
+                            settingsLink.href = '#';
+                            settingsLink.style.color = '#fff';
+                            settingsLink.style.textDecoration = 'underline';
+                            settingsLink.textContent = '去配置';
+                            settingsLink.addEventListener('click', event => {
+                                event.preventDefault();
+                                openSettings();
+                            });
+                            text.appendChild(settingsLink);
                         }
                     }
                 } catch (e) {
@@ -1179,17 +1190,17 @@
             function renderMarkdown(text) {
                 if (!text) return '';
                 try {
-                    return marked.parse(text);
+                    return DOMPurify.sanitize(marked.parse(text));
                 } catch (e) {
                     console.error('Markdown 解析失败:', e);
-                    return text.replace(/\n/g, '<br>');
+                    return escapeHtml(text).replace(/\n/g, '<br>');
                 }
             }
 
             // 渲染智能分析
             function renderSmartAnalysis(data) {
                 const content = document.getElementById('smart-analysis-content');
-                const modelInfo = data.model_used ? `<span style="font-size:11px; opacity:0.6; margin-left:10px;">(${data.model_used})</span>` : '';
+                const modelInfo = data.model_used ? `<span style="font-size:11px; opacity:0.6; margin-left:10px;">(${escapeHtml(data.model_used)})</span>` : '';
                 const searchBadge = data.web_search_used
                     ? '<span style="font-size:11px; color:#2e7d32; margin-left:8px;">🌐 已联网检索</span>'
                     : '<span style="font-size:11px; color:#999; margin-left:8px;">📚 基于模型知识（未联网）</span>';
@@ -1302,7 +1313,7 @@
                 ` : '';
                 
                 content.innerHTML = `
-                    <h3 style="color:#667eea; margin-bottom:15px;">${smartAnalysisData.title}</h3>
+                    <h3 style="color:#667eea; margin-bottom:15px;">${escapeHtml(smartAnalysisData.title)}</h3>
                     
                     <div style="margin-bottom:20px;">
                         <h4 style="color:#333; margin-bottom:10px;">📊 市场概况</h4>
@@ -1354,7 +1365,7 @@
                     <p style="color:#999; font-size:12px; margin-top:20px; text-align:right;">
                         ${smartAnalysisData.web_search_used ? '🌐 已联网检索实时数据' : '📚 基于模型已有知识（未联网，数据可能过时）'}<br>
                         生成时间: ${new Date(smartAnalysisData.generated_at).toLocaleString('zh-CN')}
-                        ${smartAnalysisData.model_used ? ` · 模型: ${smartAnalysisData.model_used}` : ''}
+                        ${smartAnalysisData.model_used ? ` · 模型: ${escapeHtml(smartAnalysisData.model_used)}` : ''}
                     </p>
                 `;
                 
@@ -1402,13 +1413,16 @@
                 const content = document.getElementById('modal-content');
 
                 if (analysisData) {
+                    const sentiment = escapeHtml(analysisData.market_sentiment);
+                    const reasons = analysisData.possible_reasons.map(r => `<li style="margin-bottom:8px;">${escapeHtml(r)}</li>`).join('');
+                    const recommendation = escapeHtml(analysisData.recommendation);
                     content.innerHTML = `
-                        <p><strong>市场情绪：</strong> ${analysisData.market_sentiment}</p>
+                        <p><strong>市场情绪：</strong> ${sentiment}</p>
                         <p style="margin-top:15px;"><strong>可能原因：</strong></p>
                         <ul style="margin-left:20px; margin-top:10px;">
-                            ${analysisData.possible_reasons.map(r => `<li style="margin-bottom:8px;">${r}</li>`).join('')}
+                            ${reasons}
                         </ul>
-                        <p style="margin-top:15px;"><strong>操作建议：</strong> ${analysisData.recommendation}</p>
+                        <p style="margin-top:15px;"><strong>操作建议：</strong> ${recommendation}</p>
                         <p style="margin-top:15px; color:#999; font-size:12px;">
                             生成时间: ${new Date(analysisData.generated_at).toLocaleString('zh-CN')}
                         </p>
@@ -1836,16 +1850,19 @@
                 container.innerHTML = llmProviders.map(p => {
                     const isActive = p.id === activeProviderId;
                     const hasKey = p.has_api_key;
+                    const safeId = escapeHtml(p.id);
+                    const safeName = escapeHtml(p.name);
+                    const safeBaseUrl = escapeHtml(p.base_url || '(无 URL)');
                     return `
                         <div class="provider-item" style="display:flex; align-items:center; padding:12px 15px; border-bottom:1px solid #eee; cursor:pointer; ${isActive ? 'background:#f0f7ff;' : ''}"
-                             onclick="selectProvider('${p.id}')">
+                             data-provider-id="${safeId}">
                             <div style="flex:1;">
                                 <div style="font-weight:500; color:#333; display:flex; align-items:center; gap:8px;">
-                                    ${p.name}
+                                    ${safeName}
                                     ${isActive ? '<span style="background:#4CAF50; color:#fff; font-size:10px; padding:2px 6px; border-radius:10px;">当前使用</span>' : ''}
                                 </div>
                                 <div style="font-size:12px; color:#999; margin-top:3px;">
-                                    ${p.base_url || '(无 URL)'}
+                                    ${safeBaseUrl}
                                     ${hasKey ? ' • <span style="color:#4CAF50;">已配置 Key</span>' : ' • <span style="color:#ff9800;">未配置 Key</span>'}
                                 </div>
                             </div>
@@ -1853,6 +1870,9 @@
                         </div>
                     `;
                 }).join('');
+                container.querySelectorAll('.provider-item').forEach(item => {
+                    item.addEventListener('click', () => selectProvider(item.dataset.providerId));
+                });
             }
 
             // 选择平台进行编辑
@@ -1942,7 +1962,7 @@
                 status.style.display = 'block';
                 status.style.background = isSuccess ? '#e8f5e9' : '#ffebee';
                 status.style.color = isSuccess ? '#2e7d32' : '#c62828';
-                status.innerHTML = message;
+                status.textContent = message;
             }
 
             // 隐藏设置状态
@@ -2096,7 +2116,7 @@
                     const result = await resp.json();
                     
                     if (result.success) {
-                        showSettingsStatus(`✅ ${result.message}${result.response ? '<br><small>' + result.response + '</small>' : ''}`, true);
+                        showSettingsStatus(`✅ ${result.message}${result.response ? '\n' + result.response : ''}`, true);
                     } else {
                         showSettingsStatus(`❌ ${result.message}`, false);
                     }

@@ -186,7 +186,7 @@ async def security_middleware(request: Request, call_next):
     path = request.url.path
 
     # 限流检查（仅对需要限流的路径）
-    if is_rate_limited_path(path) and settings.enable_auth:
+    if is_rate_limited_path(path):
         limiter = get_limiter()
         allowed, remaining = limiter.is_allowed(request)
         if not allowed:

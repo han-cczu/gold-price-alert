@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Query
 
 from ..collector import create_data_source
+from ..data_sources.base import close_data_source
 from ..schemas import ChartDataResponse, PriceResponse, PriceHistoryResponse
 from ..state import db
 
@@ -23,6 +24,7 @@ async def get_chart_data(
 
     if not records:
         # 如果没有数据，尝试获取最新价格
+        source = None
         try:
             source = create_data_source()
             price_data = await source.fetch_price()
@@ -39,6 +41,9 @@ async def get_chart_data(
                 high=0,
                 low=0,
             )
+        finally:
+            if source is not None:
+                await close_data_source(source)
 
     # 根据时间范围调整时间格式
     if hours <= 24:
@@ -71,7 +76,10 @@ async def get_chart_data(
 async def get_current_price():
     """获取当前金价"""
     source = create_data_source()
-    price_data = await source.fetch_price()
+    try:
+        price_data = await source.fetch_price()
+    finally:
+        await close_data_source(source)
 
     # 保存到数据库
     db.save_price(price_data.price, price_data.source)

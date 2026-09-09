@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import os
+import re
 import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,6 +16,8 @@ from .config import settings
 from .models import Database
 
 logger = logging.getLogger(__name__)
+
+_SAFE_BACKUP_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 class BackupResult(TypedDict, total=False):
@@ -217,12 +220,19 @@ class DataLifecycleManager:
         }
 
         try:
-            # 确保备份目录存在
-            self._backup_path.mkdir(parents=True, exist_ok=True)
-
             # 生成备份文件名
             if not backup_name:
                 backup_name = f"gold_prices_{datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y%m%d_%H%M%S')}"
+            elif (
+                backup_name in {".", ".."}
+                or Path(backup_name).name != backup_name
+                or not _SAFE_BACKUP_NAME.fullmatch(backup_name)
+            ):
+                result["error"] = "非法备份名称：只能使用字母、数字、点、下划线和短横线"
+                return result
+
+            # 确保备份目录存在
+            self._backup_path.mkdir(parents=True, exist_ok=True)
 
             # 检查数据库类型
             if "sqlite" in settings.database_url:

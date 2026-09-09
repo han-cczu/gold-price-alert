@@ -131,9 +131,7 @@ class APIKeyAuth:
 
     def verify_admin_key(self, request: Request) -> bool:
         """验证管理 API Key"""
-        key = request.headers.get("X-Admin-Key") or request.query_params.get(
-            "admin_key"
-        )
+        key = request.headers.get("X-Admin-Key")
         return bool(key and secrets.compare_digest(key, self._admin_key))
 
     async def require_admin(self, request: Request):

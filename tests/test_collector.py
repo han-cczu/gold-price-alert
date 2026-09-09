@@ -75,8 +75,10 @@ async def test_parallel_first_returns_none_when_all_fail(collector):
 @pytest.mark.asyncio
 async def test_parallel_first_picks_a_successful_source(collector):
     """有多个成功源时，返回其中之一的有效价格"""
-    collector._sources = [SlowSource(price=2000.0, delay=0.01, name="a"),
-                          SlowSource(price=2001.0, delay=0.02, name="b")]
+    collector._sources = [
+        SlowSource(price=2000.0, delay=0.01, name="a"),
+        SlowSource(price=2001.0, delay=0.02, name="b"),
+    ]
 
     result = await collector._fetch_parallel_first()
 

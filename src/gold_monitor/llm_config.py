@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 ENCRYPT_API_KEYS = os.getenv("GOLD_ENCRYPT_API_KEYS", "false").lower() == "true"
 
 # 配置文件路径
-CONFIG_FILE = Path("llm_config.json")
+CONFIG_FILE = Path(os.getenv("GOLD_LLM_CONFIG_PATH", "llm_config.json"))
 
 
 @dataclass

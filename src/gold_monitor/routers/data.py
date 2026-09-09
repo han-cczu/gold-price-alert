@@ -24,7 +24,7 @@ def _parse_iso_datetime(value: Optional[str], field_name: str) -> Optional[datet
 
 
 @router.get("/api/data/stats")
-async def get_data_stats():
+async def get_data_stats(_admin: bool = Depends(require_admin_dep)):
     """获取数据统计信息"""
     manager = get_lifecycle_manager(db)
     if not manager:
@@ -38,6 +38,7 @@ async def export_data(
     start: Optional[str] = Query(default=None, description="起始时间 (ISO格式)"),
     end: Optional[str] = Query(default=None, description="结束时间 (ISO格式)"),
     limit: int = Query(default=1000, le=10000, description="最大记录数"),
+    _admin: bool = Depends(require_admin_dep),
 ):
     """导出价格数据"""
     manager = get_lifecycle_manager(db)
@@ -88,7 +89,7 @@ async def backup_data(
 
 
 @router.get("/api/data/backups")
-async def list_backups():
+async def list_backups(_admin: bool = Depends(require_admin_dep)):
     """列出所有备份文件"""
     manager = get_lifecycle_manager(db)
     if not manager:

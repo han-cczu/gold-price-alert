@@ -25,15 +25,12 @@ jobs:
       
       - name: Run Ruff (lint)
         run: ruff check src/ --output-format=github
-        continue-on-error: true
       
       - name: Run Ruff (format check)
-        run: ruff format src/ --check
-        continue-on-error: true
+        run: ruff format . --check
       
       - name: Run MyPy
         run: mypy src/ --ignore-missing-imports
-        continue-on-error: true
 
   test:
     name: 测试
@@ -94,5 +91,4 @@ jobs:
       - name: Run pip-audit
         run: |
           pip install -e .
-          pip-audit --ignore-vuln GHSA-xxxx-xxxx-xxxx || true
-        continue-on-error: true
+          pip-audit

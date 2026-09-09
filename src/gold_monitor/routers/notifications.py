@@ -3,17 +3,17 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from ..config import settings
 from ..schemas import NotificationConfigRequest, NotificationTestRequest
-from ..state import db
+from ..state import db, require_admin_dep
 
 router = APIRouter()
 
 
 @router.get("/api/notifications/config")
-async def get_notification_configs():
+async def get_notification_configs(_admin: bool = Depends(require_admin_dep)):
     """获取所有通知渠道配置"""
     configs = db.get_all_notification_configs()
     return {
@@ -30,7 +30,9 @@ async def get_notification_configs():
 
 
 @router.get("/api/notifications/config/{channel}")
-async def get_notification_config(channel: str):
+async def get_notification_config(
+    channel: str, _admin: bool = Depends(require_admin_dep)
+):
     """获取指定通知渠道配置"""
     config = db.get_notification_config(channel)
     if not config:
@@ -49,7 +51,11 @@ async def get_notification_config(channel: str):
 
 
 @router.put("/api/notifications/config/{channel}")
-async def update_notification_config(channel: str, request: NotificationConfigRequest):
+async def update_notification_config(
+    channel: str,
+    request: NotificationConfigRequest,
+    _admin: bool = Depends(require_admin_dep),
+):
     """更新通知渠道配置"""
     config = db.save_notification_config(
         channel_type=channel, enabled=request.enabled, config=request.config
@@ -64,7 +70,9 @@ async def update_notification_config(channel: str, request: NotificationConfigRe
 
 @router.get("/api/notifications/logs")
 async def get_notification_logs(
-    limit: int = Query(default=100, le=500), channel: Optional[str] = None
+    limit: int = Query(default=100, le=500),
+    channel: Optional[str] = None,
+    _admin: bool = Depends(require_admin_dep),
 ):
     """获取通知发送日志"""
     logs = db.get_notification_logs(limit=limit, channel=channel)
@@ -87,7 +95,9 @@ async def get_notification_logs(
 
 @router.post("/api/notifications/test/{channel}")
 async def test_notification(
-    channel: str, request: Optional[NotificationTestRequest] = None
+    channel: str,
+    request: Optional[NotificationTestRequest] = None,
+    _admin: bool = Depends(require_admin_dep),
 ):
     """测试通知发送"""
     from ..alert import (
