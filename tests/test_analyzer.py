@@ -467,3 +467,75 @@ async def test_anthropic_provider_uses_first_text_block(monkeypatch):
     provider = AnthropicProvider(api_key="k")
 
     assert await provider._call_llm("prompt") == "文本结果"
+
+
+@pytest.mark.asyncio
+async def test_tavily_available_but_unused_is_marked_without_search(monkeypatch):
+    """Configuring a search tool does not prove the model used it."""
+    _FakeAsyncOpenAI._chat = _FakeChat(
+        [
+            _FakeMessage(
+                content="### 市场概况\n固定样本\n### 风险提示\n基础风险",
+                tool_calls=None,
+            )
+        ]
+    )
+    import openai
+
+    monkeypatch.setattr(openai, "AsyncOpenAI", _FakeAsyncOpenAI)
+    provider = OpenAIProvider(
+        api_key="fake-key",
+        base_url="https://example.invalid",
+        tavily_api_key="fake-search-key",
+    )
+    report = await provider.smart_analyze()
+    assert report.web_search_used is False
+    assert report.sources == []
+    assert "未启用联网搜索" in report.risk_warning
+
+
+@pytest.mark.asyncio
+async def test_provider_closes_sdk_client_when_call_fails(monkeypatch):
+    closed = []
+
+    class Messages:
+        async def create(self, **kwargs):
+            raise RuntimeError("fake SDK failure")
+
+    class Client:
+        def __init__(self, **kwargs):
+            self.messages = Messages()
+
+        async def close(self):
+            closed.append(True)
+
+    import anthropic
+    from gold_monitor.analyzer import AnthropicProvider
+
+    monkeypatch.setattr(anthropic, "AsyncAnthropic", Client)
+    with pytest.raises(RuntimeError, match="fake SDK failure"):
+        await AnthropicProvider(api_key="fake-key")._call_llm("prompt")
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_tavily_backend_closes_client_on_failure(monkeypatch):
+    closed = []
+
+    class Client:
+        def __init__(self, api_key):
+            pass
+
+        async def search(self, **kwargs):
+            raise RuntimeError("fake search failure")
+
+        async def close(self):
+            closed.append(True)
+
+    import tavily
+    from gold_monitor.web_search import tavily_search
+
+    monkeypatch.setattr(tavily, "AsyncTavilyClient", Client)
+    with pytest.raises(RuntimeError, match="fake search failure"):
+        await tavily_search("gold", api_key="fake", include_domains=[])
+    assert closed == [True]

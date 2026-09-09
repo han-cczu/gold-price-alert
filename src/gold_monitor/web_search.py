@@ -8,6 +8,7 @@ anthropic/openai 的延迟导入风格一致。
 """
 
 from typing import Any
+import inspect
 
 
 async def tavily_search(
@@ -34,12 +35,19 @@ async def tavily_search(
     from tavily import AsyncTavilyClient  # type: ignore[import-not-found,import-untyped]
 
     client = AsyncTavilyClient(api_key)
-    resp: dict[str, Any] = await client.search(
-        query=query,
-        topic="news",
-        time_range="week",
-        search_depth="advanced",
-        max_results=max_results,
-        include_domains=include_domains,
-    )
-    return resp.get("results", []) or []
+    try:
+        resp: dict[str, Any] = await client.search(
+            query=query,
+            topic="news",
+            time_range="week",
+            search_depth="advanced",
+            max_results=max_results,
+            include_domains=include_domains,
+        )
+        return resp.get("results", []) or []
+    finally:
+        close = getattr(client, "close", None) or getattr(client, "aclose", None)
+        if close is not None:
+            result = close()
+            if inspect.isawaitable(result):
+                await result

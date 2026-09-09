@@ -1,22 +1,24 @@
-"""数据生命周期管理模块 - 归档、清理、导出、备份"""
+"""Data retention, bounded exports and database-aware backup operations."""
 
 import asyncio
+from contextlib import closing
 import csv
 import io
 import json
 import logging
 import os
 import re
-import shutil
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional, TypedDict
+from tempfile import NamedTemporaryFile
+from typing import Callable, Optional, TypedDict
 
-from .config import settings
-from .models import Database
+from .config import Settings, settings
+from .models import Database, GoldPrice
+from .time_utils import iso_utc, storage_time, utcnow
 
 logger = logging.getLogger(__name__)
-
 _SAFE_BACKUP_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
@@ -26,6 +28,8 @@ class BackupResult(TypedDict, total=False):
     size_bytes: int
     backup_time: str
     error: str
+    backup_scope: str
+    record_limit: int
 
 
 class BackupInfo(TypedDict):
@@ -35,9 +39,21 @@ class BackupInfo(TypedDict):
     created_at: str
 
 
-class DataLifecycleManager:
-    """数据生命周期管理器"""
+def _atomic_file(destination: Path, write: Callable[[Path], None]) -> None:
+    """Publish a complete file only after its writer succeeds."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with NamedTemporaryFile(
+        dir=destination.parent, suffix=".tmp", delete=False
+    ) as file:
+        temporary = Path(file.name)
+    try:
+        write(temporary)
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
 
+
+class DataLifecycleManager:
     def __init__(
         self,
         database: Database,
@@ -45,68 +61,115 @@ class DataLifecycleManager:
         hourly_aggregation_days: int | None = None,
         daily_aggregation_days: int | None = None,
         backup_path: str | None = None,
+        config: Settings | None = None,
     ):
+        config = config if config is not None else settings
         self._db = database
-        self._retention_days = retention_days or settings.data_retention_days
-        self._hourly_days = hourly_aggregation_days or settings.hourly_aggregation_days
-        self._daily_days = daily_aggregation_days or settings.daily_aggregation_days
-        self._backup_path = Path(backup_path or settings.backup_path)
-
-    # ============ 数据清理 ============
+        self._retention_days = (
+            config.data_retention_days if retention_days is None else retention_days
+        )
+        self._hourly_days = (
+            config.hourly_aggregation_days
+            if hourly_aggregation_days is None
+            else hourly_aggregation_days
+        )
+        self._daily_days = (
+            config.daily_aggregation_days
+            if daily_aggregation_days is None
+            else daily_aggregation_days
+        )
+        if self._retention_days < 1:
+            raise ValueError("数据保留天数不能小于 1")
+        self._backup_path = Path(
+            config.backup_path if backup_path is None else backup_path
+        )
 
     async def cleanup(self) -> dict:
-        """执行数据清理任务
-
-        Returns:
-            {"deleted_count": int, "archived_count": int}
-        """
+        """Delete expired raw prices. Aggregation remains unsupported."""
         result = {
             "deleted_count": 0,
             "archived_count": 0,
-            "cleanup_time": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+            "cleanup_time": iso_utc(utcnow()),
         }
-
         try:
-            # 1. 删除超过保留期的分钟级数据
-            cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
-                days=self._retention_days
+            cutoff = utcnow() - timedelta(days=self._retention_days)
+            result["deleted_count"] = await self._db.run(
+                self._db.delete_old_prices, cutoff
             )
-            deleted = self._db.delete_old_prices(cutoff)
-            result["deleted_count"] = deleted
-            logger.info(
-                "清理完成: 删除 %d 条旧数据（%d 天前）", deleted, self._retention_days
-            )
-
-            # TODO: 实现数据聚合（分钟级 -> 小时级 -> 日级）
-            # 这需要创建额外的聚合表
-
-        except Exception as e:
-            logger.error("数据清理失败: %s", e)
-            result["error"] = str(e)
-
+        except Exception as error:
+            logger.exception("数据清理失败")
+            result["error"] = str(error)
         return result
 
     async def get_stats(self) -> dict:
-        """获取数据统计信息"""
         try:
-            total_count = self._db.get_price_count()
-            oldest = self._db.get_oldest_price()
-            latest = self._db.get_latest_price()
-
+            total_count = await self._db.run(self._db.get_price_count)
+            oldest = await self._db.run(self._db.get_oldest_price)
+            latest = await self._db.run(self._db.get_latest_price)
             return {
                 "total_records": total_count,
-                "oldest_record": oldest.timestamp.isoformat() if oldest else None,
-                "latest_record": latest.timestamp.isoformat() if latest else None,
+                "oldest_record": iso_utc(oldest.timestamp) if oldest else None,
+                "latest_record": iso_utc(latest.timestamp) if latest else None,
                 "retention_days": self._retention_days,
-                "database_url": settings.database_url.split("///")[-1]
-                if "sqlite" in settings.database_url
+                "database_url": self._db.engine.url.database
+                if self._is_sqlite
                 else "remote",
             }
-        except Exception as e:
-            logger.error("获取数据统计失败: %s", e)
-            return {"error": str(e)}
+        except Exception as error:
+            logger.exception("获取数据统计失败")
+            return {"error": str(error)}
 
-    # ============ 数据导出 ============
+    async def _export_records(
+        self,
+        start: datetime | None,
+        end: datetime | None,
+        limit: int,
+    ) -> list[GoldPrice]:
+        if start is None and end is None:
+            return await self._db.run(self._db.get_recent_prices, limit)
+        lower = storage_time(start) if start is not None else datetime.min
+        upper = storage_time(end) if end is not None else datetime.max
+        if lower > upper:
+            raise ValueError("start 不能晚于 end")
+        return await self._db.run(self._db.get_prices_in_range, lower, upper, limit)
+
+    @staticmethod
+    def _csv(records: list[GoldPrice]) -> str:
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["id", "price", "currency", "source", "timestamp"])
+        for record in records:
+            writer.writerow(
+                [
+                    record.id,
+                    record.price,
+                    record.currency,
+                    record.source,
+                    iso_utc(record.timestamp),
+                ]
+            )
+        return output.getvalue()
+
+    @staticmethod
+    def _json(records: list[GoldPrice]) -> str:
+        return json.dumps(
+            {
+                "export_time": iso_utc(utcnow()),
+                "record_count": len(records),
+                "records": [
+                    {
+                        "id": record.id,
+                        "price": record.price,
+                        "currency": record.currency,
+                        "source": record.source,
+                        "timestamp": iso_utc(record.timestamp),
+                    }
+                    for record in records
+                ],
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
 
     async def export_csv(
         self,
@@ -114,46 +177,8 @@ class DataLifecycleManager:
         end: datetime | None = None,
         limit: int = 10000,
     ) -> str:
-        """导出数据为 CSV 格式
-
-        Args:
-            start: 起始时间
-            end: 结束时间
-            limit: 最大记录数
-
-        Returns:
-            CSV 字符串
-        """
-        try:
-            if start and end:
-                records = self._db.get_prices_in_range(start, end)
-            else:
-                records = self._db.get_recent_prices(limit)
-
-            output = io.StringIO()
-            writer = csv.writer(output)
-
-            # 写入表头
-            writer.writerow(["id", "price", "currency", "source", "timestamp"])
-
-            # 写入数据
-            for record in records:
-                writer.writerow(
-                    [
-                        record.id,
-                        record.price,
-                        record.currency,
-                        record.source,
-                        record.timestamp.isoformat(),
-                    ]
-                )
-
-            logger.info("导出 CSV: %d 条记录", len(records))
-            return output.getvalue()
-
-        except Exception as e:
-            logger.error("CSV 导出失败: %s", e)
-            raise
+        records = await self._export_records(start, end, limit)
+        return await asyncio.to_thread(self._csv, records)
 
     async def export_json(
         self,
@@ -161,183 +186,172 @@ class DataLifecycleManager:
         end: datetime | None = None,
         limit: int = 10000,
     ) -> str:
-        """导出数据为 JSON 格式
+        records = await self._export_records(start, end, limit)
+        return await asyncio.to_thread(self._json, records)
 
-        Args:
-            start: 起始时间
-            end: 结束时间
-            limit: 最大记录数
+    @property
+    def _is_sqlite(self) -> bool:
+        return self._db.engine.url.get_backend_name() == "sqlite"
 
-        Returns:
-            JSON 字符串
-        """
-        try:
-            if start and end:
-                records = self._db.get_prices_in_range(start, end)
-            else:
-                records = self._db.get_recent_prices(limit)
+    def _sqlite_path(self) -> Path | None:
+        name = self._db.engine.url.database
+        if not self._is_sqlite or name in (None, "", ":memory:"):
+            return None
+        assert name is not None
+        return Path(name).resolve()
 
-            data = {
-                "export_time": datetime.now(timezone.utc)
-                .replace(tzinfo=None)
-                .isoformat(),
-                "record_count": len(records),
-                "records": [
-                    {
-                        "id": r.id,
-                        "price": r.price,
-                        "currency": r.currency,
-                        "source": r.source,
-                        "timestamp": r.timestamp.isoformat(),
-                    }
-                    for r in records
-                ],
-            }
+    def _backup_destination(self, name: str, extension: str) -> Path:
+        if (
+            name in {".", ".."}
+            or Path(name).name != name
+            or not _SAFE_BACKUP_NAME.fullmatch(name)
+        ):
+            raise ValueError("非法备份名称：只能使用字母、数字、点、下划线和短横线")
+        root = self._backup_path.resolve()
+        destination = (root / f"{name}{extension}").resolve()
+        if destination.parent != root or destination == self._sqlite_path():
+            raise ValueError("非法备份名称：备份不能覆盖当前数据库或写出备份目录")
+        return destination
 
-            logger.info("导出 JSON: %d 条记录", len(records))
-            return json.dumps(data, indent=2, ensure_ascii=False)
+    def _backup_sqlite(self, destination: Path) -> int:
+        """Runs inside db.run; use the injected connection, including memory/WAL DBs."""
 
-        except Exception as e:
-            logger.error("JSON 导出失败: %s", e)
-            raise
+        def write(temporary: Path) -> None:
+            with self._db.get_session() as session:
+                source = session.connection().connection.driver_connection
+                if not isinstance(source, sqlite3.Connection):
+                    raise TypeError("SQLite 驱动不支持 backup API")
+                with closing(sqlite3.connect(temporary)) as target:
+                    source.backup(target)
 
-    # ============ 数据备份 ============
+        _atomic_file(destination, write)
+        return destination.stat().st_size
 
     async def backup_database(self, backup_name: str | None = None) -> BackupResult:
-        """备份数据库
-
-        Args:
-            backup_name: 备份文件名（不含扩展名）
-
-        Returns:
-            {"success": bool, "backup_path": str, "size_bytes": int}
-        """
         result: BackupResult = {
             "success": False,
             "backup_path": None,
             "size_bytes": 0,
-            "backup_time": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+            "backup_time": iso_utc(utcnow()),
         }
-
         try:
-            # 生成备份文件名
-            if not backup_name:
-                backup_name = f"gold_prices_{datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y%m%d_%H%M%S')}"
-            elif (
-                backup_name in {".", ".."}
-                or Path(backup_name).name != backup_name
-                or not _SAFE_BACKUP_NAME.fullmatch(backup_name)
-            ):
-                result["error"] = "非法备份名称：只能使用字母、数字、点、下划线和短横线"
-                return result
-
-            # 确保备份目录存在
-            self._backup_path.mkdir(parents=True, exist_ok=True)
-
-            # 检查数据库类型
-            if "sqlite" in settings.database_url:
-                # SQLite 直接复制文件
-                db_path = settings.database_url.replace("sqlite:///", "")
-                backup_file = self._backup_path / f"{backup_name}.db"
-
-                if os.path.exists(db_path):
-                    shutil.copy2(db_path, backup_file)
-                    result["success"] = True
-                    result["backup_path"] = str(backup_file)
-                    size_bytes = os.path.getsize(backup_file)
-                    result["size_bytes"] = size_bytes
-                    logger.info(
-                        "数据库备份完成: %s (%.2f MB)",
-                        backup_file,
-                        size_bytes / 1024 / 1024,
-                    )
-                else:
-                    result["error"] = f"数据库文件不存在: {db_path}"
+            name = backup_name or f"gold_prices_{utcnow().strftime('%Y%m%d_%H%M%S')}"
+            extension = ".db" if self._is_sqlite else ".json"
+            destination = await asyncio.to_thread(
+                self._backup_destination, name, extension
+            )
+            if self._is_sqlite:
+                result["size_bytes"] = await self._db.run(
+                    self._backup_sqlite, destination
+                )
             else:
-                # 其他数据库导出为 JSON
-                json_data = await self.export_json(limit=100000)
-                backup_file = self._backup_path / f"{backup_name}.json"
+                # Retain the historical non-SQLite price export, and identify its scope.
+                data = await self.export_json(limit=100000)
 
-                with open(backup_file, "w", encoding="utf-8") as f:
-                    f.write(json_data)
+                def write_export() -> int:
+                    def write(temporary: Path) -> None:
+                        temporary.write_text(data, encoding="utf-8")
 
-                result["success"] = True
-                result["backup_path"] = str(backup_file)
-                result["size_bytes"] = os.path.getsize(backup_file)
-                logger.info("数据库备份完成（JSON）: %s", backup_file)
+                    _atomic_file(destination, write)
+                    return destination.stat().st_size
 
-        except Exception as e:
-            logger.error("数据库备份失败: %s", e)
-            result["error"] = str(e)
-
+                result["size_bytes"] = await asyncio.to_thread(write_export)
+                result["backup_scope"] = "prices_only"
+                result["record_limit"] = 100000
+            result["success"] = True
+            result["backup_path"] = str(destination)
+        except Exception as error:
+            logger.exception("数据库备份失败")
+            result["error"] = str(error)
         return result
 
-    async def list_backups(self) -> list[BackupInfo]:
-        """列出所有备份文件"""
+    def _list_backups(self) -> list[BackupInfo]:
         backups: list[BackupInfo] = []
+        if not self._backup_path.exists():
+            return backups
+        for file in self._backup_path.iterdir():
+            if file.is_file() and file.suffix in (".db", ".json"):
+                stat = file.stat()
+                backups.append(
+                    {
+                        "name": file.name,
+                        "path": str(file),
+                        "size_bytes": stat.st_size,
+                        "created_at": iso_utc(
+                            datetime.fromtimestamp(stat.st_ctime, timezone.utc)
+                        ),
+                    }
+                )
+        return sorted(backups, key=lambda backup: backup["created_at"], reverse=True)
 
+    async def list_backups(self) -> list[BackupInfo]:
         try:
-            if not self._backup_path.exists():
-                return backups
+            return await asyncio.to_thread(self._list_backups)
+        except Exception:
+            logger.exception("列出备份失败")
+            return []
 
-            for f in self._backup_path.iterdir():
-                if f.is_file() and f.suffix in (".db", ".json"):
-                    stat = f.stat()
-                    backups.append(
-                        {
-                            "name": f.name,
-                            "path": str(f),
-                            "size_bytes": stat.st_size,
-                            "created_at": datetime.fromtimestamp(
-                                stat.st_ctime
-                            ).isoformat(),
-                        }
-                    )
+    @staticmethod
+    def _validate_backup(source: Path) -> None:
+        if not source.is_file() or source.suffix.lower() != ".db":
+            raise ValueError("备份文件必须是存在的 SQLite .db 文件")
+        with source.open("rb") as file:
+            if file.read(16) != b"SQLite format 3\x00":
+                raise ValueError("备份不是有效的 SQLite 数据库")
+        with closing(
+            sqlite3.connect(f"{source.as_uri()}?mode=ro", uri=True)
+        ) as connection:
+            if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+                raise ValueError("SQLite 备份完整性检查失败")
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            if "gold_prices" not in tables:
+                raise ValueError("备份缺少 gold_prices 表")
 
-            backups.sort(key=lambda x: x["created_at"], reverse=True)
+    def _restore_offline(self, source: Path) -> None:
+        destination = self._sqlite_path()
+        if destination is None:
+            raise ValueError("只能离线恢复到文件型 SQLite 数据库")
+        source = source.resolve()
+        if source == destination:
+            raise ValueError("备份文件不能是当前数据库")
+        self._validate_backup(source)
+        # No app workers/connections may be active. Keep a recoverable pre-restore copy.
+        if destination.exists():
 
-        except Exception as e:
-            logger.error("列出备份失败: %s", e)
+            def write_current(temporary: Path) -> None:
+                with closing(sqlite3.connect(destination)) as current:
+                    with closing(sqlite3.connect(temporary)) as previous:
+                        current.backup(previous)
 
-        return backups
+            _atomic_file(Path(f"{destination}.bak"), write_current)
+        with closing(sqlite3.connect(f"{source.as_uri()}?mode=ro", uri=True)) as backup:
+            with closing(sqlite3.connect(destination)) as target:
+                backup.backup(target)
 
     async def restore_backup(self, backup_path: str) -> dict:
-        """从备份恢复数据库
+        """Offline only: stop all writers/processes and await db.aclose() first.
 
-        注意：这是一个危险操作，会覆盖现有数据
+        This instance must remain closed. Create a new Database after restoration.
+        No HTTP restore route is registered.
         """
         result = {
             "success": False,
             "restored_from": backup_path,
-            "restore_time": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+            "restore_time": iso_utc(utcnow()),
         }
-
         try:
-            backup_file = Path(backup_path)
-            if not backup_file.exists():
-                result["error"] = f"备份文件不存在: {backup_path}"
-                return result
-
-            if "sqlite" in settings.database_url and backup_file.suffix == ".db":
-                # SQLite 直接替换文件
-                db_path = settings.database_url.replace("sqlite:///", "")
-
-                # 先备份当前数据库
-                if os.path.exists(db_path):
-                    current_backup = f"{db_path}.bak"
-                    shutil.copy2(db_path, current_backup)
-
-                # 恢复备份
-                shutil.copy2(backup_file, db_path)
-                result["success"] = True
-                logger.info("数据库恢复完成: %s", backup_path)
-            else:
-                result["error"] = "暂不支持从此格式恢复"
-
-        except Exception as e:
-            logger.error("数据库恢复失败: %s", e)
-            result["error"] = str(e)
-
+            if not self._db.closed:
+                raise ValueError("恢复前必须停止所有数据库使用者并调用 db.aclose()")
+            await asyncio.to_thread(self._restore_offline, Path(backup_path))
+            result["success"] = True
+        except Exception as error:
+            logger.exception("数据库恢复失败")
+            result["error"] = str(error)
         return result
 
 
@@ -367,7 +381,7 @@ async def _cleanup_scheduler(manager: DataLifecycleManager, interval_hours: int 
 
 
 def start_cleanup_scheduler(manager: DataLifecycleManager, interval_hours: int = 24):
-    """启动定时清理任务"""
+    """旧调用兼容；应用 runtime 自己拥有清理任务，不调用此全局入口。"""
     global _cleanup_task
     if _cleanup_task is None or _cleanup_task.done():
         _cleanup_task = asyncio.create_task(_cleanup_scheduler(manager, interval_hours))
@@ -389,7 +403,7 @@ _lifecycle_manager: Optional[DataLifecycleManager] = None
 def get_lifecycle_manager(
     database: Database | None = None,
 ) -> Optional[DataLifecycleManager]:
-    """获取全局生命周期管理器"""
+    """旧调用兼容；新应用从 runtime 获取自己的管理器。"""
     global _lifecycle_manager
     if _lifecycle_manager is None and database:
         _lifecycle_manager = DataLifecycleManager(database)

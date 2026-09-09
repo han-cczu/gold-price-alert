@@ -44,7 +44,7 @@ gold-monitor = "gold_monitor.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-gold_monitor = ["static/*.html"]
+gold_monitor = ["static/*.html", "static/css/*.css", "static/js/*.js"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

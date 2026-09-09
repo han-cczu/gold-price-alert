@@ -1,39 +1,20 @@
 """Web API 测试"""
 
-import pytest
-from fastapi.testclient import TestClient
-
-# 设置测试环境变量
-import os
-
-os.environ["GOLD_DATA_SOURCE"] = "mock"
-os.environ["GOLD_LLM_PROVIDER"] = "mock"
-os.environ["GOLD_DATABASE_URL"] = "sqlite:///test_web.db"
-
-from gold_monitor.web import app, db
-from gold_monitor.data_sources.base import PriceData
-
-
-@pytest.fixture(scope="module")
-def client():
-    """创建测试客户端"""
-    db.create_tables()
-    # 预填充一些测试数据
-    for i in range(5):
-        db.save_price(2000 + i * 10, "mock")
-    yield TestClient(app)
-
 
 def test_root_page(client):
     """测试首页"""
     response = client.get("/")
     assert response.status_code == 200
     assert "金价实时监控系统" in response.text
+    assert response.headers["content-type"].startswith("text/html")
+    declared = client.get("/openapi.json").json()["paths"]["/"]["get"]
+    assert "text/html" in declared["responses"]["200"]["content"]
 
 
-def test_web_tests_use_isolated_test_database():
-    """Web 测试必须使用测试库，不能污染本地运行库。"""
-    assert "test_web.db" in str(db.engine.url)
+def test_web_tests_use_isolated_test_database(client):
+    runtime = client.app.state.runtime
+    assert runtime.started
+    assert str(runtime.db.engine.url.database).endswith("app.db")
 
 
 def test_health_check(client):
@@ -60,25 +41,20 @@ def test_get_current_price(client):
     assert data["price"] > 0
 
 
-def test_get_current_price_closes_temporary_data_source(client, monkeypatch):
-    """一次性创建的数据源在请求结束后必须关闭。"""
-    from gold_monitor.routers import price as price_router
+def test_get_current_price_uses_collector_and_preserves_timestamp(client, monkeypatch):
+    from datetime import datetime
+    from gold_monitor.data_sources.base import PriceData
 
-    closed = {"value": False}
+    async def fetch():
+        return PriceData(
+            price=2000, source="fake", currency="CNY", timestamp=datetime(2026, 1, 1)
+        )
 
-    class FakeSource:
-        async def fetch_price(self):
-            return PriceData(price=2000.0, source="fake")
-
-        async def close(self):
-            closed["value"] = True
-
-    monkeypatch.setattr(price_router, "create_data_source", lambda: FakeSource())
-
+    monkeypatch.setattr(client.app.state.runtime.collector, "fetch_once", fetch)
     response = client.get("/api/price/current")
-
     assert response.status_code == 200
-    assert closed["value"] is True
+    assert response.json()["currency"] == "CNY"
+    assert response.json()["timestamp"] == "2026-01-01T00:00:00Z"
 
 
 def test_get_latest_price(client):
@@ -228,37 +204,37 @@ def test_collector_stats_api(client):
     """测试采集器统计 API"""
     response = client.get("/api/collector/stats")
     # 在测试环境可能采集器未运行
-    if response.status_code == 200:
-        data = response.json()
-        assert "running" in data
-        assert "stats" in data
-        assert "config" in data
+    assert response.status_code == 200
+    data = response.json()
+    assert "running" in data
+    assert "stats" in data
+    assert "config" in data
 
 
 def test_collector_config_api(client):
     """测试采集器配置 API"""
     response = client.get("/api/collector/config")
-    if response.status_code == 200:
-        data = response.json()
-        assert "interval" in data
-        assert "strategy" in data
-        assert "deduplicate" in data
+    assert response.status_code == 200
+    data = response.json()
+    assert "interval" in data
+    assert "strategy" in data
+    assert "deduplicate" in data
 
 
 def test_update_collector_interval(client):
     """测试运行时修改采集间隔"""
     response = client.post("/api/collector/config?interval=60")
-    if response.status_code == 200:
-        data = response.json()
-        assert "changes" in data
-        assert data["changes"].get("interval") == 60
+    assert response.status_code == 200
+    data = response.json()
+    assert "changes" in data
+    assert data["changes"].get("interval") == 60
 
 
 def test_detect_gaps_api(client):
     """测试检测数据间隙"""
     response = client.get("/api/collector/gaps?hours=1")
-    if response.status_code == 200:
-        data = response.json()
-        assert "gaps" in data
-        assert "count" in data
-        assert isinstance(data["gaps"], list)
+    assert response.status_code == 200
+    data = response.json()
+    assert "gaps" in data
+    assert "count" in data
+    assert isinstance(data["gaps"], list)

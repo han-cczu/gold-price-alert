@@ -2,19 +2,19 @@
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
 
-from ..collector import get_collector
+from ..dependencies import get_runtime
 
 router = APIRouter()
 
 
 @router.get("/api/source-quality")
-async def get_source_quality():
+async def get_source_quality(runtime=Depends(get_runtime)):
     """获取数据源质量评分"""
-    collector = get_collector()
+    collector = runtime.collector
     if not collector:
-        return {"error": "采集器未运行", "qualities": [], "confidence": None}
+        raise HTTPException(status_code=503, detail="采集器未运行")
 
     qualities = collector.get_source_quality()
     confidence = collector.get_overall_confidence()
@@ -27,10 +27,10 @@ async def get_source_quality():
 
 
 @router.get("/api/source-quality/confidence")
-async def get_data_confidence():
+async def get_data_confidence(runtime=Depends(get_runtime)):
     """获取整体数据置信度（轻量级接口，用于前端实时展示）"""
-    collector = get_collector()
+    collector = runtime.collector
     if not collector:
-        return {"confidence": 0, "status": "unknown", "message": "采集器未运行"}
+        raise HTTPException(status_code=503, detail="采集器未运行")
 
     return collector.get_overall_confidence()

@@ -15,10 +15,15 @@ class PriceData:
     currency: str = "USD"
     timestamp: datetime | None = None
     source: str = "unknown"
+    recorded: bool | None = None  # Set by the collector after persistence.
 
     def __post_init__(self):
         if self.timestamp is None:
             self.timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
+        elif self.timestamp.tzinfo is not None:
+            self.timestamp = self.timestamp.astimezone(timezone.utc).replace(
+                tzinfo=None
+            )
 
 
 class BaseDataSource(ABC):
@@ -42,6 +47,9 @@ class BaseDataSource(ABC):
             return True
         except Exception:
             return False
+
+    async def close(self) -> None:
+        """Release resources owned by this source; resource-free sources do nothing."""
 
 
 async def close_data_source(source: Any) -> None:

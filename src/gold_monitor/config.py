@@ -63,6 +63,8 @@ class Settings(BaseSettings):
         default="",
         description="Tavily 搜索 API Key（启用 DeepSeek/兼容接口的真实联网搜索）",
     )
+    llm_config_path: str = Field(default="llm_config.json", description="模型配置文件")
+    encrypt_api_keys: bool = Field(default=False, description="加密保存模型密钥")
 
     # 安全配置
     secret_key: str = Field(default="", description="主密钥（用于加密存储）")

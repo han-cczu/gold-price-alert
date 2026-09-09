@@ -1,163 +1,115 @@
-"""系统级路由：/health、/metrics、/api/config、/api/security/status、/ws、/ws/status"""
+"""Health, configuration, metrics and WebSocket HTTP adapters."""
 
 import json
-from datetime import datetime, timezone
-
-from fastapi import APIRouter, Response, WebSocket, WebSocketDisconnect
-
-from ..config import settings
-from ..collector import create_data_source, get_collector
-from ..data_sources.base import close_data_source
-from ..llm_config import get_llm_config_manager
+from fastapi import (
+    APIRouter,
+    Depends,
+    Request,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from ..dependencies import get_runtime
 from ..schemas import HealthResponse
-from ..state import db, ws_manager, get_app_start_time
 from ..metrics import get_metrics, get_metrics_content_type, update_db_records
+from ..time_utils import utcnow, iso_utc
 
 router = APIRouter()
 
 
-# ============ WebSocket 端点 ============
-
-
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket 实时价格推送
-
-    消息格式:
-    - 价格更新: {"type": "price_update", "data": {...}}
-    - 告警通知: {"type": "alert", "data": {...}}
-    - 心跳: {"type": "ping"} -> {"type": "pong"}
-    """
-    await ws_manager.connect(websocket)
-
-    # 连接成功后发送当前价格
-    collector = get_collector()
-    if collector and collector.last_price:
-        assert collector.last_price.timestamp is not None
-        await websocket.send_json(
-            {
-                "type": "price_update",
-                "data": {
-                    "price": collector.last_price.price,
-                    "currency": collector.last_price.currency,
-                    "source": collector.last_price.source,
-                    "timestamp": collector.last_price.timestamp.isoformat(),
-                },
-            }
-        )
-
+    runtime = websocket.app.state.runtime
+    if not runtime.started:
+        await websocket.close(code=1013)
+        return
+    await runtime.ws.connect(websocket)
     try:
+        price = runtime.collector.last_price
+        if price:
+            await runtime.ws.send(
+                websocket,
+                {
+                    "type": "price_update",
+                    "data": {
+                        "price": price.price,
+                        "currency": price.currency,
+                        "source": price.source,
+                        "timestamp": iso_utc(price.timestamp),
+                        "recorded": price.recorded,
+                    },
+                },
+            )
         while True:
-            # 接收客户端消息（心跳检测）
             data = await websocket.receive_text()
             try:
                 message = json.loads(data)
-                if message.get("type") == "ping":
-                    await websocket.send_json({"type": "pong"})
+                if isinstance(message, dict) and message.get("type") == "ping":
+                    await runtime.ws.send(websocket, {"type": "pong"})
             except json.JSONDecodeError:
-                pass
+                continue
     except WebSocketDisconnect:
-        await ws_manager.disconnect(websocket)
+        pass
+    finally:
+        await runtime.ws.disconnect(websocket)
 
 
 @router.get("/ws/status")
-async def websocket_status():
-    """WebSocket 连接状态"""
-    return {"active_connections": ws_manager.connection_count, "endpoint": "/ws"}
+async def websocket_status(runtime=Depends(get_runtime)):
+    return {"active_connections": runtime.ws.connection_count, "endpoint": "/ws"}
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health_check():
-    """健康检查"""
-    last_record = db.get_latest_price()
-    collector = get_collector()
-
-    # 检查数据源健康状态
-    data_source_healthy = False
+async def health_check(runtime=Depends(get_runtime)):
+    status, last = "connected", None
     try:
-        source = create_data_source()
-        try:
-            data_source_healthy = await source.health_check()
-        finally:
-            await close_data_source(source)
+        last = await runtime.db.run(runtime.db.get_latest_price)
     except Exception:
-        data_source_healthy = False
-
-    # 检查数据库连接
-    db_status = "connected"
-    try:
-        from sqlalchemy import text
-
-        with db.get_session() as session:
-            session.execute(text("SELECT 1"))
-    except Exception:
-        db_status = "disconnected"
-
-    # 计算运行时间
-    uptime = (
-        datetime.now(timezone.utc).replace(tzinfo=None) - get_app_start_time()
-    ).total_seconds()
-
-    # 检查采集器状态
-    collector_running = collector is not None and collector.is_running
-    collector_stats = collector.stats.to_dict() if collector else None
-
-    # 判断整体健康状态
-    status = (
-        "healthy" if db_status == "connected" and collector_running else "unhealthy"
-    )
-
+        status = "disconnected"
+    collector = runtime.collector
+    running = collector.is_running
     return HealthResponse(
-        status=status,
-        database=db_status,
-        data_source=settings.data_source,
-        data_source_healthy=data_source_healthy,
-        collector_running=collector_running,
-        collector_stats=collector_stats,
-        last_price=last_record.price if last_record else None,
-        last_update=last_record.timestamp if last_record else None,
-        uptime_seconds=uptime,
-        fetch_interval=settings.fetch_interval,
+        status="healthy" if status == "connected" and running else "unhealthy",
+        database=status,
+        data_source=runtime.config.data_source,
+        data_source_healthy=bool(collector.last_price)
+        and collector.stats.consecutive_failures == 0,
+        collector_running=running,
+        collector_stats=collector.stats.to_dict(),
+        last_price=last.price if last else None,
+        last_update=last.timestamp if last else None,
+        uptime_seconds=(utcnow() - runtime.started_at).total_seconds(),
+        fetch_interval=collector.get_config()["interval"],
     )
 
 
 @router.get("/api/config")
-async def get_config():
-    """获取当前配置（脱敏）"""
-    llm_config = get_llm_config_manager().get_config()
-    active_provider = llm_config.get_active_provider()
+async def get_config(runtime=Depends(get_runtime)):
+    config = runtime.config
+    llm = runtime.llm_config.get_config()
+    active = llm.get_active_provider()
     return {
-        "data_source": settings.data_source,
-        "fetch_interval": settings.fetch_interval,
-        "alert_threshold_percent": settings.alert_threshold_percent,
-        "alert_price_upper": settings.alert_price_upper,
-        "alert_price_lower": settings.alert_price_lower,
-        # 返回当前激活的平台 ID（不返回 API Key）
-        "llm_provider": active_provider.id
-        if active_provider
-        else (llm_config.active_provider_id or "mock"),
-        "llm_model": llm_config.active_model or None,
+        "data_source": config.data_source,
+        "fetch_interval": runtime.collector.get_config()["interval"],
+        "alert_threshold_percent": config.alert_threshold_percent,
+        "alert_price_upper": config.alert_price_upper,
+        "alert_price_lower": config.alert_price_lower,
+        "llm_provider": active.id if active else "mock",
+        "llm_model": llm.active_model or None,
     }
 
 
 @router.get("/metrics")
-async def prometheus_metrics():
-    """Prometheus 指标端点"""
-    # 更新数据库记录数
-    try:
-        count = db.get_price_count()
-        update_db_records(count)
-    except Exception:
-        pass
-
+async def prometheus_metrics(runtime=Depends(get_runtime)):
+    update_db_records(await runtime.db.run(runtime.db.get_price_count))
     return Response(content=get_metrics(), media_type=get_metrics_content_type())
 
 
 @router.get("/api/security/status")
-async def get_security_status():
-    """获取安全配置状态"""
+async def get_security_status(request: Request):
+    config = request.app.state.settings
     return {
-        "auth_enabled": settings.enable_auth,
-        "rate_limit_per_minute": settings.rate_limit_per_minute,
-        "admin_key_configured": bool(settings.admin_api_key),
+        "auth_enabled": config.enable_auth,
+        "rate_limit_per_minute": config.rate_limit_per_minute,
+        "admin_key_configured": bool(config.admin_api_key),
     }

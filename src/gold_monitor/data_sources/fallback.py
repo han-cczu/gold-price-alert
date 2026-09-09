@@ -1,7 +1,7 @@
 """故障自动切换数据源"""
 
 import logging
-from .base import BaseDataSource, PriceData
+from .base import BaseDataSource, PriceData, close_data_source
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +15,8 @@ class FallbackDataSource(BaseDataSource):
     def __init__(self, sources: list[BaseDataSource], max_retries: int = 2):
         if not sources:
             raise ValueError("至少需要一个数据源")
+        if max_retries < 1:
+            raise ValueError("重试次数不能小于 1")
         self._sources = sources
         self._max_retries = max_retries
         self._current_index = 0
@@ -68,6 +70,14 @@ class FallbackDataSource(BaseDataSource):
             if await source.health_check():
                 return True
         return False
+
+    async def close(self) -> None:
+        """The wrapper owns every child, including inactive fallback sources."""
+        for source in self._sources:
+            try:
+                await close_data_source(source)
+            except Exception:
+                logger.exception("关闭备用数据源 %s 失败", source.name)
 
     def get_status(self) -> dict:
         """返回各数据源的健康状态"""

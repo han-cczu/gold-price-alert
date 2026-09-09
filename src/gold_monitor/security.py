@@ -106,22 +106,30 @@ class SecretManager:
 class APIKeyAuth:
     """API Key 鉴权"""
 
-    def __init__(self, admin_api_key: str | None = None):
+    def __init__(self, admin_api_key: str | None = None, *, config=None):
         """
         初始化 API Key 鉴权
 
         Args:
             admin_api_key: 管理接口 API Key，如果不提供则从环境变量获取
         """
+        self._settings = config if config is not None else settings
         self._admin_key = (
-            admin_api_key or os.getenv("GOLD_ADMIN_API_KEY") or settings.admin_api_key
+            config.admin_api_key
+            if config is not None
+            else (
+                admin_api_key
+                or os.getenv("GOLD_ADMIN_API_KEY")
+                or settings.admin_api_key
+            )
         )
+        if admin_api_key is not None:
+            self._admin_key = admin_api_key
         if not self._admin_key:
             # 如果未配置，生成一个临时的（生产环境应该配置）
             self._admin_key = secrets.token_urlsafe(32)
             logger.warning(
-                "未配置 GOLD_ADMIN_API_KEY，生成临时密钥: %s (请在生产环境中配置)",
-                self._admin_key[:8] + "...",
+                "未配置 GOLD_ADMIN_API_KEY，已生成临时密钥；配置固定密钥后方可使用管理接口",
             )
 
     @property
@@ -140,7 +148,7 @@ class APIKeyAuth:
         与中间件保持一致：仅在 enable_auth=True 时强制校验，
         默认开发模式（enable_auth=False）放行。
         """
-        if not settings.enable_auth:
+        if not self._settings.enable_auth:
             return True
 
         if not self.verify_admin_key(request):

@@ -1,12 +1,18 @@
 """LLM 配置管理模块 - 支持多个模型服务平台"""
 
 import json
+import hashlib
+import tempfile
+from copy import deepcopy
+from threading import RLock
 import logging
 import os
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
+
+from .config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -90,82 +96,99 @@ class LLMConfig:
         return None
 
 
+class LLMConfigPersistenceError(RuntimeError):
+    """A configuration change could not be persisted; published state is unchanged."""
+
+
+class LLMConfigLoadError(RuntimeError):
+    """An existing configuration cannot be read safely."""
+
+
 class LLMConfigManager:
-    """LLM 配置管理器"""
+    """Publish configuration snapshots only after an atomic file replacement."""
 
     def __init__(
-        self, config_path: Optional[Path] = None, encrypt_keys: bool | None = None
+        self,
+        config_path: Optional[Path] = None,
+        encrypt_keys: bool | None = None,
+        *,
+        settings: Settings | None = None,
+        secret_manager: Any = None,
     ):
-        self.config_path = config_path or CONFIG_FILE
-        self._config: Optional[LLMConfig] = None
-        self._encrypt_keys = (
-            encrypt_keys if encrypt_keys is not None else ENCRYPT_API_KEYS
+        self.settings = settings or Settings()
+        self.config_path = (
+            Path(config_path)
+            if config_path is not None
+            else Path(getattr(self.settings, "llm_config_path", CONFIG_FILE))
         )
-        self._secret_manager = None
+        self._encrypt_keys = (
+            encrypt_keys
+            if encrypt_keys is not None
+            else getattr(self.settings, "encrypt_api_keys", ENCRYPT_API_KEYS)
+        )
+        self._config: Optional[LLMConfig] = None
+        self._revision = 0
+        self._lock = RLock()
+        self._secret_manager = secret_manager
+        if self._secret_manager is None and (
+            self._encrypt_keys or self.settings.secret_key
+        ):
+            from .security import SecretManager
 
-        if self._encrypt_keys:
-            try:
-                from .security import get_secret_manager
-
-                self._secret_manager = get_secret_manager()
-                logger.info("LLM 配置管理器启用加密存储")
-            except ImportError:
-                logger.warning("无法导入安全模块，API Key 将以明文存储")
-                self._encrypt_keys = False
+            if self._encrypt_keys and not self.settings.secret_key:
+                raise ValueError(
+                    "加密 LLM 配置需要稳定的 GOLD_SECRET_KEY 或显式密钥管理器"
+                )
+            self._secret_manager = SecretManager(self.settings.secret_key)
 
     def _encrypt_api_key(self, key: str) -> str:
-        """加密 API Key"""
-        if not self._encrypt_keys or not self._secret_manager or not key:
+        if not self._encrypt_keys or not key:
             return key
-        # 如果已经是加密格式，不重复加密
-        if key.startswith("enc:"):
-            return key
-        return "enc:" + self._secret_manager.encrypt(key)
+        if self._secret_manager is None:
+            raise ValueError("缺少 API Key 加密器")
+        encrypted = self._secret_manager.encrypt(key)
+        if not encrypted:
+            raise ValueError("API Key 加密失败")
+        return "enc:" + encrypted
 
     def _decrypt_api_key(self, key: str) -> str:
-        """解密 API Key"""
-        if not self._secret_manager or not key:
+        if not key.startswith("enc:"):
             return key
-        # 检查是否是加密格式
-        if key.startswith("enc:"):
-            return self._secret_manager.decrypt(key[4:])
-        return key
+        if self._secret_manager is None:
+            raise ValueError("读取已加密 API Key 需要配置 GOLD_SECRET_KEY")
+        decrypted = self._secret_manager.decrypt(key[4:])
+        if not decrypted:
+            raise ValueError("API Key 解密失败")
+        return decrypted
 
     def _load_from_file(self) -> Optional[LLMConfig]:
-        """从文件加载配置"""
-        if not self.config_path.exists():
-            return None
-
         try:
-            with open(self.config_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-                # 转换 providers 为 ModelProvider 对象，并解密 API Key
-                providers: list[ModelProvider] = []
-                for p in data.get("providers", []):
-                    # 解密 API Key
-                    if "api_key" in p:
-                        p["api_key"] = self._decrypt_api_key(p["api_key"])
-                    providers.append(ModelProvider(**p))
-
-                return LLMConfig(
-                    providers=providers,
-                    active_provider_id=data.get("active_provider_id", ""),
-                    active_model=data.get("active_model", ""),
-                )
-        except Exception as e:
-            logger.warning(f"加载 LLM 配置失败: {e}")
+            with self.config_path.open("r", encoding="utf-8") as stream:
+                data = json.load(stream)
+            providers = []
+            for item in data.get("providers", []):
+                item = dict(item)
+                item["api_key"] = self._decrypt_api_key(item.get("api_key", ""))
+                providers.append(ModelProvider(**item))
+            return LLMConfig(
+                providers=providers,
+                active_provider_id=data.get("active_provider_id", ""),
+                active_model=data.get("active_model", ""),
+            )
+        except FileNotFoundError:
             return None
+        except Exception as exc:
+            raise LLMConfigLoadError("无法读取 LLM 配置，原有效配置未变更") from exc
 
     def _create_default_config(self) -> LLMConfig:
-        """创建默认配置（包含预设平台）"""
+        """Use application environment defaults only when no saved file exists."""
         default_providers = [
             ModelProvider(id="mock", name="Mock（模拟测试）", base_url="", api_key=""),
             ModelProvider(
                 id="openai",
                 name="OpenAI",
-                base_url="https://api.openai.com",
-                api_key="",
+                base_url=self.settings.openai_base_url or "https://api.openai.com",
+                api_key=self.settings.openai_api_key,
             ),
             ModelProvider(
                 id="deepseek",
@@ -173,108 +196,161 @@ class LLMConfigManager:
                 base_url="https://api.deepseek.com",
                 api_key="",
             ),
+            ModelProvider(
+                id="anthropic",
+                name="Anthropic Claude",
+                base_url="https://api.anthropic.com",
+                api_key=self.settings.anthropic_api_key,
+            ),
         ]
+        requested = self.settings.llm_provider.strip().lower()
+        active_id = next(
+            (
+                provider.id
+                for provider in default_providers
+                if provider.id == requested and provider.api_key
+            ),
+            "mock",
+        )
         return LLMConfig(
-            providers=default_providers, active_provider_id="mock", active_model=""
+            providers=default_providers, active_provider_id=active_id, active_model=""
         )
 
+    @staticmethod
+    def config_fingerprint(config: LLMConfig) -> str:
+        serialized = json.dumps(config.to_dict(), sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    @property
+    def fingerprint(self) -> str:
+        return self.config_fingerprint(self.get_config())
+
+    @property
+    def revision(self) -> int:
+        return self._revision
+
     def get_config(self, force_reload: bool = False) -> LLMConfig:
-        """获取当前配置"""
-        if self._config is None or force_reload:
-            self._config = self._load_from_file()
-            if self._config is None:
-                self._config = self._create_default_config()
-        return self._config
+        """Return a detached snapshot so callers cannot mutate published state."""
+        with self._lock:
+            if self._config is None or force_reload:
+                candidate = self._load_from_file() or self._create_default_config()
+                if self._config is None or self.config_fingerprint(
+                    candidate
+                ) != self.config_fingerprint(self._config):
+                    self._config = candidate
+                    self._revision += 1
+            return deepcopy(self._config)
 
     def reload_config(self) -> LLMConfig:
-        """强制重新加载配置"""
         return self.get_config(force_reload=True)
 
     def save_config(self, config: LLMConfig) -> bool:
-        """保存配置到文件"""
-        try:
-            # 准备保存的数据，加密 API Key
-            data: dict[str, Any] = {
-                "active_provider_id": config.active_provider_id,
-                "active_model": config.active_model,
-                "providers": [],
-            }
-
-            for p in config.providers:
-                provider_dict = p.to_dict()
-                # 加密 API Key
-                if provider_dict.get("api_key"):
-                    provider_dict["api_key"] = self._encrypt_api_key(
-                        provider_dict["api_key"]
-                    )
-                data["providers"].append(provider_dict)
-
-            with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-
-            self._config = config
-            logger.info("LLM 配置已保存")
-            return True
-        except Exception as e:
-            logger.error(f"保存 LLM 配置失败: {e}")
-            return False
+        """Write beside the target, fsync, then atomically replace and publish."""
+        with self._lock:
+            temporary: Path | None = None
+            try:
+                candidate = deepcopy(config)
+                data = candidate.to_dict()
+                for provider in data["providers"]:
+                    provider["api_key"] = self._encrypt_api_key(provider["api_key"])
+                # Serialize before creating a temporary file or touching the target.
+                serialized = json.dumps(data, indent=2, ensure_ascii=False)
+                self.config_path.parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=self.config_path.parent,
+                    prefix=f".{self.config_path.name}.",
+                    suffix=".tmp",
+                    delete=False,
+                ) as stream:
+                    temporary = Path(stream.name)
+                    stream.write(serialized)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, self.config_path)
+                self._config = candidate
+                self._revision += 1
+                return True
+            except Exception as exc:
+                raise LLMConfigPersistenceError(
+                    "保存 LLM 配置失败，原有效配置未变更"
+                ) from exc
+            finally:
+                if temporary is not None:
+                    try:
+                        temporary.unlink(missing_ok=True)
+                    except OSError:
+                        logger.warning("无法清理未发布的 LLM 配置临时文件")
 
     def add_provider(
         self, name: str, base_url: str, api_key: str = ""
     ) -> ModelProvider:
         """添加新的模型服务平台"""
-        config = self.get_config()
-        provider = ModelProvider(name=name, base_url=base_url, api_key=api_key)
-        config.providers.append(provider)
-        self.save_config(config)
-        return provider
+        with self._lock:
+            config = self.get_config()
+            provider = ModelProvider(name=name, base_url=base_url, api_key=api_key)
+            config.providers.append(provider)
+            self.save_config(config)
+            return provider
 
     def update_provider(self, provider_id: str, **kwargs) -> Optional[ModelProvider]:
         """更新平台配置"""
-        config = self.get_config()
-        for i, provider in enumerate(config.providers):
-            if provider.id == provider_id:
-                # 更新字段
-                for key, value in kwargs.items():
-                    if hasattr(provider, key) and value is not None:
-                        setattr(provider, key, value)
-                config.providers[i] = provider
-                self.save_config(config)
-                return provider
-        return None
+        with self._lock:
+            config = self.get_config()
+            for i, provider in enumerate(config.providers):
+                if provider.id == provider_id:
+                    # 更新字段
+                    for key, value in kwargs.items():
+                        if (
+                            key in {"name", "base_url", "api_key", "models"}
+                            and value is not None
+                        ):
+                            if key == "api_key" and (
+                                not value or "..." in value or value == "****"
+                            ):
+                                continue
+                            setattr(provider, key, value)
+                    config.providers[i] = provider
+                    self.save_config(config)
+                    return provider
+            return None
 
     def delete_provider(self, provider_id: str) -> bool:
         """删除平台"""
-        config = self.get_config()
-        original_len = len(config.providers)
-        config.providers = [p for p in config.providers if p.id != provider_id]
-        if len(config.providers) < original_len:
-            # 如果删除的是当前激活的平台，切换到第一个
-            if config.active_provider_id == provider_id and config.providers:
-                first = config.providers[0]
-                config.active_provider_id = first.id
-            self.save_config(config)
-            return True
-        return False
+        with self._lock:
+            config = self.get_config()
+            original_len = len(config.providers)
+            config.providers = [p for p in config.providers if p.id != provider_id]
+            if len(config.providers) < original_len:
+                # 如果删除的是当前激活的平台，切换到第一个
+                if config.active_provider_id == provider_id and config.providers:
+                    first = config.providers[0]
+                    config.active_provider_id = first.id
+                    config.active_model = ""
+                self.save_config(config)
+                return True
+            return False
 
     def set_active(self, provider_id: str, model: str = "") -> bool:
         """设置当前使用的平台和模型"""
-        config = self.get_config()
-        # 验证 provider 存在
-        found = False
-        for provider in config.providers:
-            if provider.id == provider_id:
-                found = True
-                break
+        with self._lock:
+            config = self.get_config()
+            # 验证 provider 存在
+            found = False
+            for provider in config.providers:
+                if provider.id == provider_id:
+                    found = True
+                    break
 
-        if not found:
-            return False
+            if not found:
+                return False
 
-        config.active_provider_id = provider_id
-        if model:
-            config.active_model = model
-        self.save_config(config)
-        return True
+            if model or config.active_provider_id != provider_id:
+                config.active_model = model
+            config.active_provider_id = provider_id
+            self.save_config(config)
+            return True
 
     def get_provider(self, provider_id: str) -> Optional[ModelProvider]:
         """获取指定平台"""
@@ -289,16 +365,8 @@ class LLMConfigManager:
         return self.update_provider(provider_id, models=models) is not None
 
     def reset_config(self) -> bool:
-        """重置配置"""
-        try:
-            if self.config_path.exists():
-                self.config_path.unlink()
-            self._config = None
-            logger.info("LLM 配置已重置")
-            return True
-        except Exception as e:
-            logger.error(f"重置 LLM 配置失败: {e}")
-            return False
+        """Reset through the same atomic commit path as other changes."""
+        return self.save_config(self._create_default_config())
 
 
 # 全局配置管理器实例
