@@ -114,6 +114,12 @@ gold-price-alert/
 - **数据库**: SQLite
 - **大模型**: Claude / OpenAI / Mock
 
+## 项目文档
+
+- [需求说明](docs/requirements.md)
+- [部署指南](docs/deployment.md)
+- [重构计划与验收清单](docs/refactoring-plan.md)
+
 ## License
 
 MIT
