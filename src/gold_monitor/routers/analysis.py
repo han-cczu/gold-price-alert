@@ -3,8 +3,8 @@
 import asyncio
 from dataclasses import asdict
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
-from ..dependencies import get_runtime
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from ..dependencies import get_runtime, require_admin_dep
 from ..llm_config import LLMConfigLoadError, LLMConfigPersistenceError
 from ..schemas import AnalysisResponse, SmartAnalysisResponse, RefreshAnalysisRequest
 from ..services.analysis import AnalysisDataError
@@ -13,7 +13,11 @@ from ..time_utils import as_utc, utcnow
 router = APIRouter()
 
 
-@router.get("/api/analysis", response_model=AnalysisResponse)
+@router.get(
+    "/api/analysis",
+    response_model=AnalysisResponse,
+    dependencies=[Depends(require_admin_dep)],
+)
 async def run_analysis(runtime=Depends(get_runtime)):
     try:
         report = await runtime.analysis.run_local(runtime.db)
@@ -29,7 +33,7 @@ async def run_analysis(runtime=Depends(get_runtime)):
 
 
 @router.get("/api/smart-analysis", response_model=SmartAnalysisResponse)
-async def get_smart_analysis(runtime=Depends(get_runtime)):
+async def get_smart_analysis(request: Request, runtime=Depends(get_runtime)):
     cache = await asyncio.to_thread(runtime.analysis.get_cache)
     if cache is not None:
         age = max(
@@ -39,6 +43,8 @@ async def get_smart_analysis(runtime=Depends(get_runtime)):
             ),
         )
         return SmartAnalysisResponse(**cache, is_cached=True, cache_age_minutes=age)
+    # Reading an existing report is public; creating a paid report is not.
+    await require_admin_dep(request)
     try:
         result = await runtime.analysis.run_smart()
     except (LLMConfigLoadError, LLMConfigPersistenceError):
@@ -50,7 +56,7 @@ async def get_smart_analysis(runtime=Depends(get_runtime)):
     return SmartAnalysisResponse(**result, is_cached=False, cache_age_minutes=0)
 
 
-@router.post("/api/smart-analysis/refresh")
+@router.post("/api/smart-analysis/refresh", dependencies=[Depends(require_admin_dep)])
 async def refresh_smart_analysis(
     request: Optional[RefreshAnalysisRequest] = None, runtime=Depends(get_runtime)
 ):

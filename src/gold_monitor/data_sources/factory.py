@@ -38,7 +38,6 @@ def create_fallback_source(config: Settings | None = None) -> FallbackDataSource
         sources.append(GoldAPIDataSource(config.goldapi_key))
 
     sources.append(SinaDataSource())
-    sources.append(MockDataSource())
 
     return FallbackDataSource(sources)
 

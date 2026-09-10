@@ -12,7 +12,7 @@ from fastapi import (
 from ..dependencies import get_runtime
 from ..schemas import HealthResponse
 from ..metrics import get_metrics, get_metrics_content_type, update_db_records
-from ..time_utils import utcnow, iso_utc
+from ..time_utils import utcnow, iso_utc, as_utc
 
 router = APIRouter()
 
@@ -60,7 +60,7 @@ async def websocket_status(runtime=Depends(get_runtime)):
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health_check(runtime=Depends(get_runtime)):
+async def health_check(response: Response, runtime=Depends(get_runtime)):
     status, last = "connected", None
     try:
         last = await runtime.db.run(runtime.db.get_latest_price)
@@ -68,18 +68,29 @@ async def health_check(runtime=Depends(get_runtime)):
         status = "disconnected"
     collector = runtime.collector
     running = collector.is_running
+    interval = collector.get_config()["interval"]
+    last_success = collector.stats.last_success_at
+    source_healthy = bool(
+        collector.last_price
+        and last_success
+        and collector.stats.consecutive_failures == 0
+        and 0
+        <= (as_utc(utcnow()) - as_utc(last_success)).total_seconds()
+        <= max(30, interval * 3)
+    )
+    healthy = status == "connected" and running and source_healthy
+    response.status_code = 200 if healthy else 503
     return HealthResponse(
-        status="healthy" if status == "connected" and running else "unhealthy",
+        status="healthy" if healthy else "unhealthy",
         database=status,
         data_source=runtime.config.data_source,
-        data_source_healthy=bool(collector.last_price)
-        and collector.stats.consecutive_failures == 0,
+        data_source_healthy=source_healthy,
         collector_running=running,
         collector_stats=collector.stats.to_dict(),
         last_price=last.price if last else None,
         last_update=last.timestamp if last else None,
         uptime_seconds=(utcnow() - runtime.started_at).total_seconds(),
-        fetch_interval=collector.get_config()["interval"],
+        fetch_interval=interval,
     )
 
 

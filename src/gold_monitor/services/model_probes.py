@@ -116,11 +116,14 @@ class ModelProbeService:
             raise ModelProbeError(502, "模型服务返回了无效数据") from exc
         finally:
             await provider.close()
-        # Persist only the model cache. Unsaved form credentials stay unsaved.
+        # A temporary endpoint/account may expose different models. Compare and
+        # save under the manager lock, including changes made during the probe.
         await asyncio.to_thread(
-            self.manager.update_provider_models,
+            self.manager.update_provider_models_if_current,
             provider_id,
             [item["id"] for item in models],
+            expected_base_url=effective.base_url,
+            expected_api_key=effective.api_key,
         )
         return {"success": True, "models": models, "count": len(models)}
 

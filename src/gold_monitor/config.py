@@ -14,6 +14,9 @@ class Settings(BaseSettings):
 
     # 数据采集配置
     fetch_interval: int = Field(default=30, description="数据采集间隔（秒）")
+    price_heartbeat_seconds: int = Field(
+        default=300, ge=1, le=3600, description="同价报价最长保存间隔（秒）"
+    )
 
     # 数据源配置
     data_source: str = Field(
@@ -70,6 +73,9 @@ class Settings(BaseSettings):
     secret_key: str = Field(default="", description="主密钥（用于加密存储）")
     admin_api_key: str = Field(default="", description="管理接口 API Key")
     rate_limit_per_minute: int = Field(default=60, description="每分钟请求限制")
+    trusted_proxy_ips: str = Field(
+        default="127.0.0.1", description="可信反向代理 IP/CIDR，供 Uvicorn 解析转发地址"
+    )
     enable_auth: bool = Field(default=False, description="是否启用接口鉴权")
     cors_allow_origins: str = Field(
         default="",
@@ -78,9 +84,19 @@ class Settings(BaseSettings):
 
     # 数据生命周期配置
     data_retention_days: int = Field(default=30, description="分钟级数据保留天数")
-    hourly_aggregation_days: int = Field(default=90, description="小时级数据聚合天数")
-    daily_aggregation_days: int = Field(default=365, description="日级数据聚合天数")
+    hourly_aggregation_days: int = Field(
+        default=90, description="兼容保留项：小时级聚合尚未实现"
+    )
+    daily_aggregation_days: int = Field(
+        default=365, description="兼容保留项：日级聚合尚未实现"
+    )
     backup_enabled: bool = Field(default=False, description="是否启用自动备份")
+    backup_interval_hours: int = Field(
+        default=24, ge=1, le=168, description="自动备份间隔（小时）"
+    )
+    backup_keep_count: int = Field(
+        default=7, ge=1, le=365, description="自动备份保留数量，不影响手动备份"
+    )
     backup_path: str = Field(default="./backups", description="备份文件路径")
 
     model_config = SettingsConfigDict(env_prefix="GOLD_", env_file=".env")

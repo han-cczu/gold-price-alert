@@ -43,6 +43,7 @@ def main():
 def run_server(host: str = "0.0.0.0", port: int = 8000, reload: bool = False):
     """启动 Web 服务"""
     import uvicorn
+    from .config import Settings
 
     print(f"""
 ╔══════════════════════════════════════════════════════════════╗
@@ -58,7 +59,13 @@ def run_server(host: str = "0.0.0.0", port: int = 8000, reload: bool = False):
     """)
 
     uvicorn.run(
-        "gold_monitor.web:app", host=host, port=port, reload=reload, log_level="info"
+        "gold_monitor.web:app",
+        host=host,
+        port=port,
+        reload=reload,
+        log_level="info",
+        proxy_headers=True,
+        forwarded_allow_ips=Settings().trusted_proxy_ips,
     )
 
 

@@ -13,7 +13,11 @@ UNIT_FACTORS = {"oz": 1.0, "g": 31.1035, "kg": 0.0311035}
 
 
 class DemoBankSource(BankGoldDataSource):
-    async def fetch_base_price_cny(self):
+    async def fetch_base_price_cny(self) -> float:
+        self._base_price_cny = 550.0
+        self._international_price = self._base_price_cny * 31.1035 / 7.2
+        self._updated_at = utcnow()
+        self._last_fetch_failed = False
         return self._base_price_cny
 
 
@@ -93,7 +97,9 @@ class MarketService:
     async def bank_prices(self):
         prices = await self._bank.fetch_all_bank_prices()
         # A single acquisition supplies both cards and their comparison baseline.
-        base_price = (prices[0].buy_price + prices[0].sell_price) / 2 if prices else 0
+        base_price = (
+            (prices[0].buy_price + prices[0].sell_price) / 2 if prices else None
+        )
         return {
             "data": [
                 {
@@ -108,7 +114,9 @@ class MarketService:
             ],
             "base_price_cny": base_price,
             "london_gold_cny": base_price,
-            "updated_at": iso_utc(utcnow()),
+            "updated_at": iso_utc(prices[0].timestamp) if prices else None,
+            "is_fallback": self._bank.is_fallback,
+            "is_stale": self._bank.is_fallback,
         }
 
     async def close(self):

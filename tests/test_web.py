@@ -20,7 +20,8 @@ def test_web_tests_use_isolated_test_database(client):
 def test_health_check(client):
     """测试健康检查"""
     response = client.get("/health")
-    assert response.status_code == 200
+    # This fixture deliberately disables the background collector.
+    assert response.status_code == 503
     data = response.json()
     assert "status" in data
     assert "database" in data

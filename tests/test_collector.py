@@ -282,3 +282,123 @@ async def test_database_failure_is_not_counted_as_success(collector, monkeypatch
     assert collector.stats.success_count == collector.stats.saved_count == 0
     assert collector.stats.failure_count == 1
     await collector.stop()
+
+
+async def test_fallback_has_separate_time_budgets_and_drains_timed_out_primary(
+    collector, monkeypatch
+):
+    from gold_monitor.data_sources.fallback import FallbackDataSource
+
+    cancelled = asyncio.Event()
+
+    class HangingSource(FailingSource):
+        async def fetch_price(self):
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+    # Scale the old whole-chain 10s budget to 5ms. Each fallback child keeps
+    # its own 20ms budget, so the healthy backup must survive the slow primary.
+    original_wait_for = asyncio.wait_for
+
+    async def scaled_wait_for(awaitable, timeout):
+        return await original_wait_for(awaitable, 0.005 if timeout == 10 else timeout)
+
+    monkeypatch.setattr(asyncio, "wait_for", scaled_wait_for)
+    collector._strategy = FetchStrategy.FALLBACK
+    collector._sources = [
+        FallbackDataSource(
+            [HangingSource("primary"), SlowSource(2300, delay=0, name="backup")],
+            source_timeout=0.02,
+        )
+    ]
+    result = await collector.collect()
+    assert result.price is not None and result.price.source == "backup"
+    assert result.saved and cancelled.is_set()
+    assert collector._db.get_price_count() == 1
+    await collector.stop()
+
+
+async def test_equal_price_heartbeat_saves_real_observations_at_boundary(collector):
+    start = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+    offsets = [0, 299, 300, 599, 600]
+    collector._sources = [
+        SequenceSource(
+            [PriceData(2300, timestamp=start + timedelta(seconds=n)) for n in offsets]
+        )
+    ]
+    results = [await collector.collect() for _ in offsets]
+    assert [result.saved for result in results] == [True, False, True, False, True]
+    assert [result.price.recorded for result in results] == [
+        True,
+        False,
+        True,
+        False,
+        True,
+    ]
+    records = collector._db.get_prices_in_range(start, start + timedelta(hours=1))
+    assert [record.timestamp for record in records] == [
+        start + timedelta(seconds=n) for n in (0, 300, 600)
+    ]
+    assert collector.stats.saved_count == 3 and collector.stats.skipped_count == 2
+    await collector.stop()
+
+
+async def test_chart_refresh_retains_unchanged_current_price_after_old_sample_expires(
+    collector,
+):
+    from gold_monitor.services.prices import PriceService
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    collector._sources = [
+        SequenceSource(
+            [
+                PriceData(2300, timestamp=now - timedelta(hours=2)),
+                PriceData(2300, timestamp=now),
+            ]
+        )
+    ]
+    assert (await collector.collect()).saved
+    chart = await PriceService(collector._db, collector).chart(1)
+    assert chart["count"] == 1 and chart["current_price"] == 2300
+    assert chart["prices"] == [2300] and chart["average"] == 2300
+    assert collector._db.get_price_count() == 2
+    await collector.stop()
+
+
+async def test_heartbeat_uses_instance_settings_and_explicit_override(collector):
+    config = Settings(_env_file=None, price_heartbeat_seconds=17)
+    default = AdvancedCollector(collector._db, config=config)
+    override = AdvancedCollector(
+        collector._db, config=config, dedupe_max_interval_seconds=23
+    )
+    assert default.get_config()["dedupe_max_interval_seconds"] == 17
+    assert override.get_config()["dedupe_max_interval_seconds"] == 23
+    await default.stop()
+    await override.stop()
+
+
+async def test_heartbeat_does_not_advance_after_failed_write(collector, monkeypatch):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    collector._sources = [
+        SequenceSource(
+            [
+                PriceData(2300, timestamp=now - timedelta(minutes=5)),
+                PriceData(2300, timestamp=now),
+                PriceData(2300, timestamp=now),
+            ]
+        )
+    ]
+    assert (await collector.collect()).saved
+    original = collector._db.save_price
+
+    def fail(*args, **kwargs):
+        raise OSError("temporary write failure")
+
+    monkeypatch.setattr(collector._db, "save_price", fail)
+    assert not (await collector.collect()).saved
+    monkeypatch.setattr(collector._db, "save_price", original)
+    assert (await collector.collect()).saved
+    assert collector._db.get_price_count() == 2
+    await collector.stop()

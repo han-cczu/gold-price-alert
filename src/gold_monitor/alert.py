@@ -234,7 +234,6 @@ class AlertMonitor:
     async def _check_price(self, price_data: PriceData) -> list[Alert]:
         """检查价格并触发告警"""
         alerts = []
-        alert_ids: list[int] = []  # 与 alerts 一一对应的告警记录ID
         now = price_data.timestamp
         assert now is not None
         price = price_data.price
@@ -253,7 +252,6 @@ class AlertMonitor:
                 triggered_at=now,
             )
             alerts.append(alert)
-            alert_ids.append(await self._record_alert(alert))
 
         # 检查下限告警
         if price <= self._threshold_lower and self._should_alert(
@@ -266,7 +264,6 @@ class AlertMonitor:
                 triggered_at=now,
             )
             alerts.append(alert)
-            alert_ids.append(await self._record_alert(alert))
 
         # 检查波动告警（使用智能或简单算法）
         if self._use_smart_volatility:
@@ -298,7 +295,6 @@ class AlertMonitor:
                         change_percent=result.change_percent,
                     )
                     alerts.append(alert)
-                    alert_ids.append(await self._record_alert(alert))
         else:
             # 使用简单的波动检测
             volatility = self._calculate_volatility()
@@ -318,16 +314,28 @@ class AlertMonitor:
                         change_percent=change_percent,
                     )
                     alerts.append(alert)
-                    alert_ids.append(await self._record_alert(alert))
 
-        # 发送通知（后台分发，避免阻塞采集循环；通知失败重试不应拖慢价格采集）
-        for alert, record_id in zip(alerts, alert_ids):
+        # Publish each successful transaction before attempting the next one.
+        # The returned list is also the runtime's WebSocket/metrics input: it
+        # contains only committed alerts, including successful partial batches.
+        committed: list[Alert] = []
+        first_error: Exception | None = None
+        for alert in alerts:
+            try:
+                record_id = await self._record_alert(alert)
+            except Exception as error:
+                first_error = first_error or error
+                logger.exception("保存告警失败: %s", alert.alert_type.value)
+                continue
             self._dispatch_notification(alert, record_id)
+            committed.append(alert)
 
         # 定期持久化状态
         await self._db.run(self._persist_state)
 
-        return alerts
+        if first_error is not None and not committed:
+            raise first_error
+        return committed
 
     def get_alert_history(self, limit: int = 50) -> list:
         """获取告警历史"""

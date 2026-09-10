@@ -364,6 +364,30 @@ class LLMConfigManager:
         """更新平台的模型列表缓存"""
         return self.update_provider(provider_id, models=models) is not None
 
+    def update_provider_models_if_current(
+        self,
+        provider_id: str,
+        models: list[str],
+        *,
+        expected_base_url: str,
+        expected_api_key: str,
+    ) -> bool:
+        """Commit a probe only if it used the still-current saved connection."""
+        with self._lock:
+            config = self.reload_config()
+            provider = next(
+                (item for item in config.providers if item.id == provider_id), None
+            )
+            if (
+                provider is None
+                or provider.base_url != expected_base_url
+                or provider.api_key != expected_api_key
+            ):
+                return False
+            provider.models = list(models)
+            self.save_config(config)
+            return True
+
     def reset_config(self) -> bool:
         """Reset through the same atomic commit path as other changes."""
         return self.save_config(self._create_default_config())

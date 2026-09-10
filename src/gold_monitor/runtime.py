@@ -84,6 +84,8 @@ class ApplicationRuntime:
             await self.db.run(self.db.create_tables)
             self.llm_config = LLMConfigManager(settings=self.config)
             self.analysis = self.analysis_factory(self.llm_config, settings=self.config)
+            if isinstance(self.analysis, AnalysisService):
+                self.analysis.attach_database(self.db)
             self.market = self.market_factory(self.config)
             self.notifications = self.notification_factory(self.db, self.config)
             channels = await self.notifications.active_channels()
@@ -114,6 +116,8 @@ class ApplicationRuntime:
             if self.background_tasks:
                 self.collector.start(self.config.fetch_interval)
                 self.spawn(self._cleanup_loop())
+                if self.config.backup_enabled:
+                    self.spawn(self._backup_loop())
                 self.spawn(self._daily_analysis())
                 self.spawn(self.analysis.run_smart())
         except BaseException:
@@ -124,6 +128,18 @@ class ApplicationRuntime:
         while True:
             await asyncio.sleep(24 * 3600)
             await self.lifecycle.cleanup()
+
+    async def _backup_loop(self):
+        while True:
+            try:
+                result = await self.lifecycle.automatic_backup(
+                    keep_count=self.config.backup_keep_count
+                )
+                if not result["success"]:
+                    logger.error("自动备份失败，保留已有备份")
+            except Exception:
+                logger.exception("自动备份任务失败，保留已有备份")
+            await asyncio.sleep(self.config.backup_interval_hours * 3600)
 
     async def _daily_analysis(self):
         while True:

@@ -187,3 +187,25 @@ def test_existing_file_empty_key_is_not_filled_from_environment(tmp_path):
     manager.save_config(config)
     assert isinstance(create_llm_provider(settings=settings), MockLLMProvider)
     assert LLMConfigManager(settings=settings).get_provider("openai").api_key == ""
+
+
+def test_conditional_model_cache_failure_preserves_file_and_memory(
+    manager, monkeypatch
+):
+    manager.update_provider("openai", api_key="fixture-key", models=["existing"])
+    current = manager.get_provider("openai")
+    before = manager.config_path.read_bytes()
+
+    def fail(*args):
+        raise OSError("fixture write failure")
+
+    monkeypatch.setattr("gold_monitor.llm_config.os.replace", fail)
+    with pytest.raises(LLMConfigPersistenceError):
+        manager.update_provider_models_if_current(
+            "openai",
+            ["new-model"],
+            expected_base_url=current.base_url,
+            expected_api_key=current.api_key,
+        )
+    assert manager.config_path.read_bytes() == before
+    assert manager.get_provider("openai").models == ["existing"]

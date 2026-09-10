@@ -219,11 +219,19 @@ def record_api_request(
     method: str, endpoint: str, status_code: int, latency_seconds: float
 ):
     """记录 API 请求"""
-    # 简化 endpoint（去掉参数）
-    endpoint = endpoint.split("?")[0]
-    if len(endpoint) > 50:
-        endpoint = endpoint[:50] + "..."
-
+    # Callers supply a registered route template, never a client-controlled path.
+    if method not in {
+        "GET",
+        "HEAD",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "OPTIONS",
+        "TRACE",
+        "CONNECT",
+    }:
+        method = "OTHER"
     status = str(status_code)
     API_REQUEST_TOTAL.labels(method=method, endpoint=endpoint, status=status).inc()
     API_REQUEST_LATENCY.labels(method=method, endpoint=endpoint).observe(
@@ -306,4 +314,6 @@ class MetricsMiddleware:
 
             # 排除指标端点本身
             if path != "/metrics":
-                record_api_request(method, path, status_code, latency)
+                route = scope.get("route")
+                endpoint = getattr(route, "path", None) or "unmatched"
+                record_api_request(method, endpoint, status_code, latency)

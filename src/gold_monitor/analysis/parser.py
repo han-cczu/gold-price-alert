@@ -54,57 +54,59 @@ def parse_smart_response(response: str) -> SmartAnalysisReport:
 
 
 def parse_response(response: str) -> AnalysisReport:
-    """解析模型响应"""
-    lines = response.strip().split("\n")
-
-    # 简单解析，提取关键信息
-    summary = ""
-    reasons = []
-    sentiment = "震荡"
-    recommendation = ""
-
+    """Parse section headings without discarding recommendation prose or lists."""
+    names = {
+        "波动原因分析": "reasons",
+        "原因分析": "reasons",
+        "波动原因": "reasons",
+        "市场情绪判断": "sentiment",
+        "市场情绪": "sentiment",
+        "短期展望": "outlook",
+        "展望": "outlook",
+        "操作建议": "recommendation",
+    }
+    headings = re.compile("(" + "|".join(names) + r")(?:[：:]\s*(.*))?")
+    sections: dict[str, list[str]] = {name: [] for name in names.values()}
     current_section = None
-    for line in lines:
+    for line in response.splitlines():
         line = line.strip()
         if not line:
             continue
+        title = line.replace("**", "").replace("__", "").strip("# ")
+        title = re.sub(r"^(?:\d+[.)、]|[-•*])\s*", "", title)
+        title = re.sub(r"^[^\w\u4e00-\u9fff]+", "", title).strip()
+        match = headings.fullmatch(title)
+        if match is not None:
+            current_section = names[match[1]]
+            line = (match[2] or "").strip()
+        if current_section is not None and line:
+            sections[current_section].append(line)
 
-        if "波动原因" in line or "原因分析" in line:
-            current_section = "reasons"
-        elif "市场情绪" in line:
-            current_section = "sentiment"
-        elif "短期展望" in line or "展望" in line:
-            current_section = "outlook"
-        elif "操作建议" in line or "建议" in line:
-            current_section = "recommendation"
-        elif line.startswith(("-", "•", "*", "1", "2", "3", "4", "5")):
-            if current_section == "reasons":
-                # 清理列表标记
-                reason = line.lstrip("-•* 0123456789.").strip()
-                if reason:
-                    reasons.append(reason)
-        else:
-            if current_section == "sentiment":
-                if "多" in line or "涨" in line or "乐观" in line:
-                    sentiment = "偏多"
-                elif "空" in line or "跌" in line or "悲观" in line:
-                    sentiment = "偏空"
-                else:
-                    sentiment = "震荡"
-            elif current_section == "recommendation":
-                recommendation += line + " "
-
-    # 如果没有解析到原因，使用默认
-    if not reasons:
-        reasons = ["市场正常波动", "短期供需变化"]
-
-    # 生成摘要
-    if not summary:
-        summary = f"金价{'上涨' if '多' in sentiment else '下跌' if '空' in sentiment else '震荡'}，市场情绪{sentiment}"
+    reasons = [
+        re.sub(r"^(?:[-•*]|\d+[.)、])\s*", "", line).strip()
+        for line in sections["reasons"]
+    ]
+    reasons = [reason for reason in reasons if reason]
+    emotion = " ".join(sections["sentiment"])
+    # Prefer explicit labels over incidental words such as "上涨乏力，偏空".
+    if "偏空" in emotion:
+        sentiment = "偏空"
+    elif "偏多" in emotion:
+        sentiment = "偏多"
+    elif "震荡" in emotion:
+        sentiment = "震荡"
+    elif any(word in emotion for word in ("空", "跌", "悲观")):
+        sentiment = "偏空"
+    elif any(word in emotion for word in ("多", "涨", "乐观")):
+        sentiment = "偏多"
+    else:
+        sentiment = "震荡"
+    summary = f"金价{'上涨' if '多' in sentiment else '下跌' if '空' in sentiment else '震荡'}，市场情绪{sentiment}"
+    recommendation = "\n".join(sections["recommendation"])
 
     return AnalysisReport(
         summary=summary,
-        possible_reasons=reasons[:5],
+        possible_reasons=reasons[:5] or ["市场正常波动", "短期供需变化"],
         market_sentiment=sentiment,
         recommendation=recommendation.strip() or "建议观望，等待更明确的市场信号",
         generated_at=datetime.now(timezone.utc).replace(tzinfo=None),

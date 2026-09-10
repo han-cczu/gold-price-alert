@@ -4,13 +4,14 @@ import asyncio
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import asdict
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from ..analysis.factory import provider_from_config
 from ..analysis.providers import LLMProvider, MockLLMProvider
 from ..config import Settings
 from ..llm_config import LLMConfig, LLMConfigManager
+from ..models import Database
 from ..time_utils import iso_utc, utcnow
 
 ProviderFactory = Callable[[LLMConfig, str | None, Settings], LLMProvider]
@@ -29,16 +30,65 @@ class AnalysisService:
         *,
         settings: Settings | None = None,
         provider_factory: ProviderFactory | None = None,
+        database: Database | None = None,
     ):
         self.config_manager = config_manager
         self.settings = settings or config_manager.settings
         self._provider_factory = provider_factory or provider_from_config
+        self._database = database
         self._cache: dict[str, Any] | None = None
         self._cache_key: tuple[str, str | None, int] | None = None
         self._inflight: dict[tuple[str, str | None, int], asyncio.Task] = {}
         self._local_tasks: set[asyncio.Task] = set()
         self._generation = 0
         self._closed = False
+
+    def attach_database(self, database: Database) -> None:
+        """Bind runtime storage before work starts, preserving factory signatures."""
+        if self._closed or self._inflight or self._local_tasks:
+            raise RuntimeError("只能在分析任务启动前绑定数据库")
+        self._database = database
+
+    @staticmethod
+    def _model_identity(
+        config: LLMConfig, provider: LLMProvider, model: str | None = None
+    ) -> tuple[str | None, str | None]:
+        if isinstance(provider, MockLLMProvider):
+            return "mock", "Mock"
+        active = config.get_active_provider()
+        return (
+            active.id if active is not None else None,
+            getattr(provider, "model", model or config.active_model or None),
+        )
+
+    @staticmethod
+    async def _save_report(
+        database: Database,
+        analysis_type: str,
+        config: LLMConfig,
+        provider: LLMProvider,
+        result: dict[str, Any],
+        *,
+        input_summary: str,
+        model: str | None = None,
+        price_range_start: datetime | None = None,
+        price_range_end: datetime | None = None,
+    ) -> None:
+        provider_id, model_name = AnalysisService._model_identity(
+            config, provider, model
+        )
+        stored = deepcopy(result)
+        stored["generated_at"] = iso_utc(stored["generated_at"])
+        await database.run(
+            database.save_analysis_record,
+            analysis_type,
+            model_provider=provider_id,
+            model_name=model_name,
+            price_range_start=price_range_start,
+            price_range_end=price_range_end,
+            input_summary=input_summary,
+            result=stored,
+        )
 
     def _key(self, config: LLMConfig, model: str | None) -> tuple[str, str | None, int]:
         return (
@@ -97,20 +147,31 @@ class AnalysisService:
         try:
             report = await provider.smart_analyze()
             result = asdict(report)
-            result["model_used"] = (
-                "Mock"
-                if isinstance(provider, MockLLMProvider)
-                else getattr(provider, "model", model or config.active_model)
-            )
-            # An older job may finish after a config update; never publish its
-            # result as the cache associated with the new configuration.
-            current = await asyncio.to_thread(self.config_manager.reload_config)
-            if key == self._key(current, model) and not self._closed:
-                self._cache = deepcopy(result)
-                self._cache_key = key
-            return result
+            result["model_used"] = self._model_identity(config, provider, model)[1]
         finally:
             await provider.close()
+        # Persist inside the shared task, once per supplier call. Failed work or
+        # failed storage must not be published as a successful cached analysis.
+        if self._database is not None:
+            await self._save_report(
+                self._database,
+                "smart",
+                config,
+                provider,
+                result,
+                model=model,
+                input_summary=(
+                    "黄金市场智能分析；联网搜索："
+                    + ("是" if report.web_search_used else "否")
+                ),
+            )
+        # An older job may finish after a config update; never publish its
+        # result as the cache associated with the new configuration.
+        current = await asyncio.to_thread(self.config_manager.reload_config)
+        if key == self._key(current, model) and not self._closed:
+            self._cache = deepcopy(result)
+            self._cache_key = key
+        return result
 
     async def close(self) -> None:
         self._closed = True
@@ -166,7 +227,7 @@ class AnalysisService:
         config = await asyncio.to_thread(self.config_manager.reload_config)
         provider = self._provider_factory(config, None, self.settings)
         try:
-            return await GoldAnalyzer(llm_provider=provider).analyze_volatility(
+            report = await GoldAnalyzer(llm_provider=provider).analyze_volatility(
                 current_price=records[-1].price,
                 price_change=records[-1].price - records[0].price,
                 recent_prices=[(item.timestamp, item.price) for item in records],
@@ -174,6 +235,20 @@ class AnalysisService:
             )
         finally:
             await provider.close()
+        await self._save_report(
+            database,
+            "volatility",
+            config,
+            provider,
+            asdict(report),
+            price_range_start=records[0].timestamp,
+            price_range_end=records[-1].timestamp,
+            input_summary=(
+                f"USD/oz；样本数：{len(records)}；窗口：{window_minutes} 分钟；"
+                f"首价：{records[0].price}；末价：{records[-1].price}"
+            ),
+        )
+        return report
 
     @staticmethod
     def _history_response(record) -> dict[str, Any]:

@@ -4,9 +4,10 @@ import pytest
 from fastapi import HTTPException
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from gold_monitor.config import settings
-from gold_monitor.security import SecretManager, APIKeyAuth, is_admin_path
+from gold_monitor.security import SecretManager, APIKeyAuth, RateLimiter, is_admin_path
 from gold_monitor.state import require_admin_dep
 from gold_monitor.web import app
 
@@ -178,3 +179,71 @@ def test_admin_path_routes_have_route_level_admin_dependency():
         dependencies = getattr(route, "dependant").dependencies
         dependency_calls = {dependency.call for dependency in dependencies}
         assert require_admin_dep in dependency_calls, route.path
+
+
+def _peer_request(host, forwarded=""):
+    return Request(
+        {
+            "type": "http",
+            "client": (host, 1234),
+            "headers": [(b"x-forwarded-for", forwarded.encode())],
+        }
+    )
+
+
+def test_rate_limit_uses_peer_not_untrusted_forwarded_header():
+    limiter = RateLimiter(1, clock=lambda: 1.0)
+    assert limiter.is_allowed(_peer_request("client-a", "203.0.113.1"))[0]
+    for forged in ("203.0.113.2", "203.0.113.3, 127.0.0.1", "", "arbitrary-id"):
+        assert not limiter.is_allowed(_peer_request("client-a", forged))[0]
+    assert limiter.is_allowed(_peer_request("client-b", "203.0.113.1"))[0]
+
+
+def test_rate_limit_reclaims_all_expired_identities():
+    now = [0.0]
+    limiter = RateLimiter(1, clock=lambda: now[0])
+    for index in range(1000):
+        assert limiter.is_allowed(_peer_request(f"client-{index}"))[0]
+    now[0] = 600.0
+    assert limiter.is_allowed(_peer_request("new-client"))[0]
+    assert list(limiter._requests) == ["new-client"]
+
+
+def test_rate_limit_capacity_does_not_evict_live_quotas():
+    now = [0.0]
+    limiter = RateLimiter(1, max_clients=2, clock=lambda: now[0])
+    assert limiter.is_allowed(_peer_request("a"))[0]
+    now[0] = 1.0
+    assert limiter.is_allowed(_peer_request("b"))[0]
+    assert not limiter.is_allowed(_peer_request("c"))[0]
+    assert not limiter.is_allowed(_peer_request("a"))[0]
+    assert len(limiter._requests) == 2
+    now[0] = 60.0
+    assert limiter.is_allowed(_peer_request("c"))[0]
+    assert list(limiter._requests) == ["b", "c"]
+
+
+def test_rate_limit_sliding_window_preserves_recent_samples():
+    now = [0.0]
+    limiter = RateLimiter(2, clock=lambda: now[0])
+    peer = _peer_request("a")
+    assert limiter.is_allowed(peer) == (True, 1)
+    now[0] = 30.0
+    assert limiter.is_allowed(peer) == (True, 0)
+    now[0] = 60.0
+    assert limiter.is_allowed(peer) == (True, 0)
+    assert limiter.is_allowed(peer) == (False, 0)
+
+
+def test_provider_trigger_routes_have_admin_dependency():
+    targets = {("GET", "/api/analysis"), ("POST", "/api/smart-analysis/refresh")}
+    found = set()
+    for route in _iter_api_routes(app.routes):
+        for method in route.methods:
+            key = (method, route.path)
+            if key in targets:
+                found.add(key)
+                assert require_admin_dep in {
+                    dependency.call for dependency in route.dependant.dependencies
+                }
+    assert found == targets

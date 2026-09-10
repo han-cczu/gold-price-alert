@@ -65,3 +65,16 @@
 - 管理接口继续使用 X-Admin-Key；脱敏模型密钥提交时保留已保存值。
 - 数据库存储无时区 UTC；重构后的公开时间带 UTC Z，历史无时区字符串按 UTC 解释。
 - 单位换算、通知配置生效、图表统计和错误响应等有意变化见 refactor-validation.md。
+
+## 2026-09-10 可靠性修复的契约调整
+
+保持以上路径与请求形状，调整以下异常状态和权限：
+
+- `/health` 就绪返回 200，不就绪返回 503；健康要求数据库可用、采集任务运行、最近采样成功且未过期。状态 JSON 的已有字段保留。
+- `GOLD_ENABLE_AUTH=true` 时，GET `/api/analysis` 和 POST `/api/smart-analysis/refresh` 需要管理员凭证。GET `/api/smart-analysis` 可公开返回已有缓存，但缓存缺失时需要管理员凭证才能启动模型任务。
+- `/api/bank-prices` 增加 `is_fallback`、`is_stale`。没有任何有效采样时，`data=[]`，`base_price_cny`、`london_gold_cny`、`updated_at` 为 null；使用旧缓存时保留成功时的时间，标识回退/过期。
+- 新分析成功后写入已有分析历史表，`smart` 共享任务仅记录一次；缓存读取不生成新历史。
+- `/api/data/backups` 的 `name` 可包含 `automatic/` 前缀，表示自动快照。手动创建接口及已有备份名称校验保持可用。
+- `/api/collector/config` 增加 `dedupe_max_interval_seconds`，表示同价真实采样的最长保存间隔。
+
+修复范围、回归验证及回退点见 [可靠性修复记录](reliability-fixes.md)。
