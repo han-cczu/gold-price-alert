@@ -3,6 +3,8 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from inspect import isawaitable
+from typing import Any
 
 
 @dataclass
@@ -13,10 +15,15 @@ class PriceData:
     currency: str = "USD"
     timestamp: datetime | None = None
     source: str = "unknown"
+    recorded: bool | None = None  # Set by the collector after persistence.
 
     def __post_init__(self):
         if self.timestamp is None:
             self.timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
+        elif self.timestamp.tzinfo is not None:
+            self.timestamp = self.timestamp.astimezone(timezone.utc).replace(
+                tzinfo=None
+            )
 
 
 class BaseDataSource(ABC):
@@ -40,3 +47,17 @@ class BaseDataSource(ABC):
             return True
         except Exception:
             return False
+
+    async def close(self) -> None:
+        """Release resources owned by this source; resource-free sources do nothing."""
+
+
+async def close_data_source(source: Any) -> None:
+    """关闭按需创建的数据源，兼容 async/sync close。"""
+    close = getattr(source, "close", None)
+    if not callable(close):
+        return
+
+    result = close()
+    if isawaitable(result):
+        await result

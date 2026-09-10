@@ -6,10 +6,18 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
+
+from .time_utils import iso_utc
 
 
-class PriceResponse(BaseModel):
+class UTCResponse(BaseModel):
+    @field_serializer("*", when_used="json", check_fields=False)
+    def serialize_utc(self, value):
+        return iso_utc(value) if isinstance(value, datetime) else value
+
+
+class PriceResponse(UTCResponse):
     price: float
     currency: str = "USD"
     source: str
@@ -30,9 +38,13 @@ class ChartDataResponse(BaseModel):
     price_change_percent: float
     high: float
     low: float
+    average: float = 0
+    count: int = 0
+    window_start: Optional[str] = None
+    window_end: Optional[str] = None
 
 
-class AlertResponse(BaseModel):
+class AlertResponse(UTCResponse):
     id: int
     alert_type: str
     price: float
@@ -40,7 +52,7 @@ class AlertResponse(BaseModel):
     triggered_at: datetime
 
 
-class AnalysisResponse(BaseModel):
+class AnalysisResponse(UTCResponse):
     summary: str
     possible_reasons: list[str]
     market_sentiment: str
@@ -48,7 +60,7 @@ class AnalysisResponse(BaseModel):
     generated_at: datetime
 
 
-class HealthResponse(BaseModel):
+class HealthResponse(UTCResponse):
     status: str
     database: str
     data_source: str
@@ -61,12 +73,15 @@ class HealthResponse(BaseModel):
     fetch_interval: int
 
 
-class ExchangeRateResponse(BaseModel):
+class ExchangeRateResponse(UTCResponse):
     usd_cny: float
-    updated_at: datetime
+    updated_at: Optional[datetime] = None
+    is_fallback: bool = False
+    is_stale: bool = False
+    source: str = "exchangerate-api"
 
 
-class BankPriceResponse(BaseModel):
+class BankPriceResponse(UTCResponse):
     bank_name: str
     bank_code: str
     buy_price: float
@@ -75,7 +90,7 @@ class BankPriceResponse(BaseModel):
     product_name: str
 
 
-class BankPricesResponse(BaseModel):
+class BankPricesResponse(UTCResponse):
     data: list[BankPriceResponse]
     base_price_cny: float
     london_gold_cny: float
@@ -105,7 +120,7 @@ class SetActiveRequest(BaseModel):
     model: Optional[str] = None
 
 
-class SmartAnalysisResponse(BaseModel):
+class SmartAnalysisResponse(UTCResponse):
     """智能分析响应"""
 
     title: str

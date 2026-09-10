@@ -3,6 +3,7 @@
 import pytest
 from fastapi import HTTPException
 from fastapi.routing import APIRoute
+from fastapi.testclient import TestClient
 
 from gold_monitor.config import settings
 from gold_monitor.security import SecretManager, APIKeyAuth, is_admin_path
@@ -11,6 +12,7 @@ from gold_monitor.web import app
 
 
 # ============ Fernet 加密 ============
+
 
 def test_fernet_roundtrip():
     sm = SecretManager(secret_key="master-key")
@@ -44,10 +46,13 @@ def test_secret_manager_defaults_to_settings_secret_key(monkeypatch):
 
     ciphertext = SecretManager().encrypt("stored-key")
 
-    assert SecretManager(secret_key="settings-secret").decrypt(ciphertext) == "stored-key"
+    assert (
+        SecretManager(secret_key="settings-secret").decrypt(ciphertext) == "stored-key"
+    )
 
 
 # ============ 管理路径覆盖 ============
+
 
 def test_admin_paths_cover_previously_missed_endpoints():
     assert is_admin_path("/api/data/export")
@@ -69,7 +74,24 @@ def test_api_key_auth_defaults_to_settings_admin_key(monkeypatch):
     assert auth.admin_key == "settings-admin"
 
 
+def test_admin_key_is_only_accepted_from_header():
+    """管理密钥不应支持 query 参数，避免进入日志/浏览器历史。"""
+    auth = APIKeyAuth(admin_api_key="secret")
+
+    assert auth.verify_admin_key(FakeRequest(headers={"X-Admin-Key": "secret"}))
+    assert not auth.verify_admin_key(FakeRequest(query={"admin_key": "secret"}))
+
+
+def test_security_status_does_not_expose_admin_key_hint():
+    """安全状态接口不应泄露管理密钥前缀。"""
+    response = TestClient(app).get("/api/security/status")
+
+    assert response.status_code == 200
+    assert "admin_key_hint" not in response.json()
+
+
 # ============ require_admin 鉴权 ============
+
 
 class FakeRequest:
     def __init__(self, headers=None, query=None):
@@ -130,13 +152,29 @@ def test_llm_write_endpoints_have_route_level_admin_dependency():
     """LLM 写接口应由路由依赖自身保护，不只依赖中间件前缀。"""
     write_methods = {"POST", "PUT", "PATCH", "DELETE"}
     llm_write_routes = [
-        route for route in _iter_api_routes(app.routes)
+        route
+        for route in _iter_api_routes(app.routes)
         if getattr(route, "path", "").startswith("/api/llm")
         and write_methods.intersection(getattr(route, "methods", set()))
     ]
 
     assert llm_write_routes
     for route in llm_write_routes:
+        dependencies = getattr(route, "dependant").dependencies
+        dependency_calls = {dependency.call for dependency in dependencies}
+        assert require_admin_dep in dependency_calls, route.path
+
+
+def test_admin_path_routes_have_route_level_admin_dependency():
+    """敏感命名空间应由路由依赖自身保护，不只依赖中间件前缀。"""
+    admin_routes = [
+        route
+        for route in _iter_api_routes(app.routes)
+        if is_admin_path(getattr(route, "path", ""))
+    ]
+
+    assert admin_routes
+    for route in admin_routes:
         dependencies = getattr(route, "dependant").dependencies
         dependency_calls = {dependency.call for dependency in dependencies}
         assert require_admin_dep in dependency_calls, route.path

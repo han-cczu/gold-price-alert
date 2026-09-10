@@ -8,8 +8,12 @@ import pytest
 from datetime import datetime, timedelta, timezone
 
 from gold_monitor.alert import (
-    AlertMonitor, Alert, AlertType,
-    ConsoleNotification, NotificationChannel, VolatilityDetector
+    AlertMonitor,
+    Alert,
+    AlertType,
+    ConsoleNotification,
+    NotificationChannel,
+    VolatilityDetector,
 )
 from gold_monitor.data_sources.base import PriceData
 from gold_monitor.models import Database
@@ -52,7 +56,7 @@ def alert_monitor(mock_db, mock_notification):
         threshold_upper=2100.0,
         threshold_lower=1900.0,
         volatility_percent=1.0,
-        volatility_window_minutes=5
+        volatility_window_minutes=5,
     )
 
 
@@ -63,7 +67,7 @@ async def test_threshold_upper_alert(alert_monitor, mock_notification):
         price=2150.0,  # 超过上限 2100
         currency="USD",
         timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
-        source="test"
+        source="test",
     )
 
     alerts = await alert_monitor.check_price(price_data)
@@ -83,7 +87,7 @@ async def test_threshold_lower_alert(alert_monitor, mock_notification):
         price=1850.0,  # 低于下限 1900
         currency="USD",
         timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
-        source="test"
+        source="test",
     )
 
     alerts = await alert_monitor.check_price(price_data)
@@ -100,7 +104,7 @@ async def test_no_alert_in_range(alert_monitor, mock_notification):
         price=2000.0,  # 在 1900-2100 范围内
         currency="USD",
         timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
-        source="test"
+        source="test",
     )
 
     alerts = await alert_monitor.check_price(price_data)
@@ -120,17 +124,26 @@ async def test_volatility_alert(alert_monitor, mock_notification):
         (2006.0, -3),  # +0.3%
         (2012.0, -2),  # +0.6%
         (2019.0, -1),  # +0.95%
-        (2025.0,  0),  # +1.25% 总涨幅
+        (2025.0, 0),  # +1.25% 总涨幅
     ]
 
     all_alerts = []
     for price, minutes_offset in trend_prices:
-        pd = PriceData(price=price, timestamp=now + timedelta(minutes=minutes_offset), source="test")
+        pd = PriceData(
+            price=price,
+            timestamp=now + timedelta(minutes=minutes_offset),
+            source="test",
+        )
         alerts = await alert_monitor.check_price(pd)
         all_alerts.extend(alerts)
 
     # 应该触发波动相关告警（VOLATILITY 或 BREAKOUT_UP 等）
-    volatility_types = {AlertType.VOLATILITY, AlertType.BREAKOUT_UP, AlertType.BREAKOUT_DOWN, AlertType.PULLBACK}
+    volatility_types = {
+        AlertType.VOLATILITY,
+        AlertType.BREAKOUT_UP,
+        AlertType.BREAKOUT_DOWN,
+        AlertType.PULLBACK,
+    }
     volatility_alerts = [a for a in all_alerts if a.alert_type in volatility_types]
     assert len(volatility_alerts) >= 1
 
@@ -146,7 +159,9 @@ async def test_alert_cooldown(alert_monitor, mock_notification):
     assert len(alerts1) == 1
 
     # 短时间内再次突破，应该不触发（冷却期内）
-    price2 = PriceData(price=2160.0, timestamp=now + timedelta(seconds=30), source="test")
+    price2 = PriceData(
+        price=2160.0, timestamp=now + timedelta(seconds=30), source="test"
+    )
     alerts2 = await alert_monitor.check_price(price2)
 
     # 只有第一次触发的告警
@@ -155,7 +170,9 @@ async def test_alert_cooldown(alert_monitor, mock_notification):
 
 
 @pytest.mark.asyncio
-async def test_notification_log_links_alert_id(alert_monitor, mock_notification, mock_db):
+async def test_notification_log_links_alert_id(
+    alert_monitor, mock_notification, mock_db
+):
     """通知日志应正确关联告警记录ID（修复前 alert_id 恒为 NULL）"""
     from gold_monitor.models import AlertRecord
 
@@ -170,9 +187,11 @@ async def test_notification_log_links_alert_id(alert_monitor, mock_notification,
     await alert_monitor.wait_pending_notifications()
 
     with mock_db.get_session() as session:
-        rec = session.query(AlertRecord).filter(
-            AlertRecord.alert_type == "threshold_upper"
-        ).first()
+        rec = (
+            session.query(AlertRecord)
+            .filter(AlertRecord.alert_type == "threshold_upper")
+            .first()
+        )
         assert rec is not None
         rec_id = rec.id
 
@@ -182,6 +201,7 @@ async def test_notification_log_links_alert_id(alert_monitor, mock_notification,
 
 
 # ============ VolatilityDetector 抗噪多条件 ============
+
 
 def _series(values):
     base = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -195,27 +215,35 @@ def test_volatility_detector_too_few_points_returns_none():
 
 def test_volatility_detector_alerts_on_clean_trend():
     """涨幅达标 + 连续同向 + 振幅可控 -> 触发"""
-    det = VolatilityDetector(threshold_percent=1.0, min_consecutive=3, max_amplitude=5.0)
+    det = VolatilityDetector(
+        threshold_percent=1.0, min_consecutive=3, max_amplitude=5.0
+    )
     result = det.analyze(_series([2000.0, 2010.0, 2020.0, 2030.0]))
     assert det.should_alert(result) is True
 
 
 def test_volatility_detector_below_threshold_no_alert():
-    det = VolatilityDetector(threshold_percent=1.0, min_consecutive=3, max_amplitude=5.0)
+    det = VolatilityDetector(
+        threshold_percent=1.0, min_consecutive=3, max_amplitude=5.0
+    )
     result = det.analyze(_series([2000.0, 2002.0, 2004.0, 2006.0]))  # 仅 +0.3%
     assert det.should_alert(result) is False
 
 
 def test_volatility_detector_rejects_high_amplitude_noise():
     """涨幅达标但剧烈震荡（大振幅）-> 视为噪声不报警"""
-    det = VolatilityDetector(threshold_percent=1.0, min_consecutive=3, max_amplitude=5.0)
+    det = VolatilityDetector(
+        threshold_percent=1.0, min_consecutive=3, max_amplitude=5.0
+    )
     result = det.analyze(_series([2000.0, 2200.0, 1900.0, 2030.0]))  # 振幅 ~15%
     assert det.should_alert(result) is False
 
 
 def test_volatility_detector_rejects_insufficient_consecutive():
     """涨幅达标但方向反复（连续同向不足）-> 不报警"""
-    det = VolatilityDetector(threshold_percent=1.0, min_consecutive=3, max_amplitude=50.0)
+    det = VolatilityDetector(
+        threshold_percent=1.0, min_consecutive=3, max_amplitude=50.0
+    )
     result = det.analyze(_series([2000.0, 2031.0, 2030.0, 2030.5]))
     assert result.consecutive_trend < 3
     assert det.should_alert(result) is False
@@ -230,7 +258,7 @@ async def test_console_notification():
         alert_type=AlertType.THRESHOLD_UPPER,
         price=2150.0,
         message="测试告警",
-        triggered_at=datetime.now(timezone.utc).replace(tzinfo=None)
+        triggered_at=datetime.now(timezone.utc).replace(tzinfo=None),
     )
 
     result = await notification.send(alert)
@@ -256,7 +284,7 @@ async def test_console_notification_handles_narrow_console_encoding(monkeypatch)
         alert_type=AlertType.THRESHOLD_UPPER,
         price=2150.0,
         message="test alert",
-        triggered_at=datetime.now(timezone.utc).replace(tzinfo=None)
+        triggered_at=datetime.now(timezone.utc).replace(tzinfo=None),
     )
 
     assert await notification.send(alert) is True

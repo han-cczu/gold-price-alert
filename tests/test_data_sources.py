@@ -50,7 +50,9 @@ async def test_mock_data_source_volatility():
 @pytest.mark.asyncio
 async def test_fallback_switches_to_healthy_source():
     """主源失败时自动切换到备用源"""
-    fallback = FallbackDataSource([_AlwaysFail("primary"), MockDataSource(base_price=2000.0)])
+    fallback = FallbackDataSource(
+        [_AlwaysFail("primary"), MockDataSource(base_price=2000.0)]
+    )
 
     data = await fallback.fetch_price()
 
@@ -71,3 +73,34 @@ async def test_fallback_raises_when_all_fail():
 def test_fallback_requires_at_least_one_source():
     with pytest.raises(ValueError):
         FallbackDataSource([])
+
+
+async def test_fallback_closes_every_owned_source_after_one_close_fails():
+    closed = []
+
+    class OwnedSource(_AlwaysFail):
+        async def close(self):
+            closed.append(self.name)
+            if self.name == "first":
+                raise RuntimeError("close failed")
+
+    source = FallbackDataSource([OwnedSource("first"), OwnedSource("second")])
+    await source.close()
+    assert closed == ["first", "second"]
+
+
+def test_source_factory_uses_instance_configuration():
+    from gold_monitor.config import Settings
+    from gold_monitor.data_sources.factory import create_data_source
+
+    config = Settings(
+        _env_file=None, data_source="goldapi", goldapi_key="local-test-key"
+    )
+    source = create_data_source(config=config)
+    assert source.name == "goldapi"
+
+
+@pytest.mark.parametrize("retries", [0, -1])
+def test_fallback_requires_positive_retry_count(retries):
+    with pytest.raises(ValueError):
+        FallbackDataSource([_AlwaysFail()], max_retries=retries)

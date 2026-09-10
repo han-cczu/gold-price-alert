@@ -1,53 +1,33 @@
-"""告警相关路由：/api/alerts"""
+"""Alert history HTTP adapter."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Optional
-
-from fastapi import APIRouter, Query
-
+from fastapi import APIRouter, Depends, Query
+from ..dependencies import get_runtime
 from ..schemas import AlertResponse
-from ..state import db
+from ..time_utils import utcnow
 
 router = APIRouter()
 
 
 @router.get("/api/alerts", response_model=list[AlertResponse])
 async def get_alerts(
-    limit: int = Query(default=50, ge=1, le=200, description="最大记录数"),
-    alert_type: Optional[str] = Query(
-        default=None,
-        description="告警类型过滤: threshold_upper, threshold_lower, volatility",
-    ),
-    hours: Optional[int] = Query(
-        default=None, ge=1, le=720, description="时间范围（小时）"
-    ),
+    limit: int = Query(50, ge=1, le=200),
+    alert_type: Optional[str] = None,
+    hours: Optional[int] = Query(None, ge=1, le=720),
+    runtime=Depends(get_runtime),
 ):
-    """获取告警历史（支持按类型和时间过滤）"""
-    from ..models import AlertRecord
-
-    with db.get_session() as session:
-        query = session.query(AlertRecord)
-
-        # 按类型过滤
-        if alert_type:
-            query = query.filter(AlertRecord.alert_type == alert_type)
-
-        # 按时间范围过滤
-        if hours:
-            start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
-                hours=hours
-            )
-            query = query.filter(AlertRecord.triggered_at >= start_time)
-
-        records = query.order_by(AlertRecord.triggered_at.desc()).limit(limit).all()
-
-        return [
-            AlertResponse(
-                id=r.id,
-                alert_type=r.alert_type,
-                price=r.price,
-                message=r.message,
-                triggered_at=r.triggered_at,
-            )
-            for r in records
-        ]
+    start = utcnow() - timedelta(hours=hours) if hours else None
+    records = await runtime.db.run(
+        runtime.db.get_alerts, limit=limit, alert_type=alert_type, start=start
+    )
+    return [
+        AlertResponse(
+            id=r.id,
+            alert_type=r.alert_type,
+            price=r.price,
+            message=r.message,
+            triggered_at=r.triggered_at,
+        )
+        for r in records
+    ]

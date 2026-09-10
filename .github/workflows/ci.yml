@@ -20,20 +20,16 @@ jobs:
       
       - name: Install linting tools
         run: |
-          pip install ruff mypy
-          pip install -e ".[dev]"
+          python -m pip install -e ".[dev]"
       
       - name: Run Ruff (lint)
-        run: ruff check src/ --output-format=github
-        continue-on-error: true
+        run: python -m ruff check src/ --output-format=github
       
       - name: Run Ruff (format check)
-        run: ruff format src/ --check
-        continue-on-error: true
+        run: python -m ruff format . --check
       
       - name: Run MyPy
-        run: mypy src/ --ignore-missing-imports
-        continue-on-error: true
+        run: python -m mypy src/ --ignore-missing-imports
 
   test:
     name: 测试
@@ -49,6 +45,11 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -e ".[dev]"
+
+      - name: Set up Node for frontend behavior tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       
       - name: Run tests
         run: pytest tests/ -v --cov=src/ --cov-report=xml --cov-report=term-missing
@@ -73,9 +74,44 @@ jobs:
         with:
           context: .
           push: false
+          load: true
           tags: gold-monitor:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Smoke test Mock container
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          container="gold-monitor-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            result=$?
+            trap - EXIT
+            set +e
+            docker logs "$container"
+            docker rm -f "$container" >/dev/null
+            exit "$result"
+          }
+          trap cleanup EXIT
+
+          # Only loopback is available; no host data or external credentials.
+          docker run --detach --name "$container" --network none \
+            -e GOLD_DATA_SOURCE=mock \
+            -e GOLD_LLM_PROVIDER=mock \
+            -e GOLD_FETCH_INTERVAL=1 \
+            -e GOLD_DATABASE_URL=sqlite:////app/data/ci_smoke.db \
+            -e GOLD_LLM_CONFIG_PATH=/app/data/ci_llm_config.json \
+            -e GOLD_SECRET_KEY=ci-smoke-only-not-a-production-secret \
+            -e GOLD_ENABLE_AUTH=false -e GOLD_ENCRYPT_API_KEYS=false \
+            -e GOLD_GOLDAPI_KEY= -e GOLD_ANTHROPIC_API_KEY= \
+            -e GOLD_OPENAI_API_KEY= -e GOLD_OPENAI_BASE_URL= -e GOLD_TAVILY_API_KEY= \
+            -e GOLD_SMTP_HOST= -e GOLD_SMTP_USERNAME= -e GOLD_SMTP_PASSWORD= \
+            -e GOLD_ALERT_EMAIL_TO= \
+            -e GOLD_WEBHOOK_URL= \
+            -e GOLD_TELEGRAM_BOT_TOKEN= -e GOLD_TELEGRAM_CHAT_ID= \
+            gold-monitor:test
+          timeout 120s docker exec -i "$container" python - < scripts/ci_docker_smoke.py
 
   security:
     name: 安全扫描
@@ -88,11 +124,11 @@ jobs:
         with:
           python-version: '3.11'
       
-      - name: Install safety
-        run: pip install safety pip-audit
+      - name: Install audit tools
+        run: python -m pip install --upgrade pip "setuptools>=83.0.0" pip-audit
       
       - name: Run pip-audit
         run: |
-          pip install -e .
-          pip-audit --ignore-vuln GHSA-xxxx-xxxx-xxxx || true
-        continue-on-error: true
+          python -m pip install -e .
+          python -m pip check
+          python -m pip_audit

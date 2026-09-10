@@ -1,17 +1,17 @@
 """采集器相关路由：/api/collector/*"""
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
-from ..collector import FetchStrategy, get_collector
-from ..state import ws_manager
+from ..collector import FetchStrategy
+from ..dependencies import require_admin_dep, get_runtime
 
 router = APIRouter()
 
 
 @router.get("/api/collector/stats")
-async def get_collector_stats():
+async def get_collector_stats(runtime=Depends(get_runtime)):
     """获取采集器详细统计"""
-    collector = get_collector()
+    collector = runtime.collector
     if not collector:
         raise HTTPException(status_code=503, detail="采集器未运行")
 
@@ -30,9 +30,11 @@ async def get_collector_stats():
 
 
 @router.get("/api/collector/config")
-async def get_collector_config():
+async def get_collector_config(
+    _admin: bool = Depends(require_admin_dep), runtime=Depends(get_runtime)
+):
     """获取采集器当前配置"""
-    collector = get_collector()
+    collector = runtime.collector
     if not collector:
         raise HTTPException(status_code=503, detail="采集器未运行")
 
@@ -45,34 +47,30 @@ async def update_collector_config(
     strategy: str = Query(
         None, description="采集策略: single, fallback, parallel_first, parallel_vote"
     ),
+    _admin: bool = Depends(require_admin_dep),
+    runtime=Depends(get_runtime),
 ):
     """运行时修改采集器配置"""
-    collector = get_collector()
+    collector = runtime.collector
     if not collector:
         raise HTTPException(status_code=503, detail="采集器未运行")
 
     changes: dict[str, int | str] = {}
 
-    if interval is not None:
-        collector.set_interval(interval)
-        changes["interval"] = interval
-
-    if strategy is not None:
-        try:
-            new_strategy = FetchStrategy(strategy)
-            collector.set_strategy(new_strategy)
-            changes["strategy"] = strategy
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail=f"无效的策略: {strategy}，可选: single, fallback, parallel_first, parallel_vote",
-            )
-
-    if not changes:
+    if interval is None and strategy is None:
         raise HTTPException(status_code=400, detail="请提供至少一个配置项")
+    try:
+        new_strategy = FetchStrategy(strategy) if strategy is not None else None
+        await collector.reconfigure(interval=interval, strategy=new_strategy)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if interval is not None:
+        changes["interval"] = interval
+    if strategy is not None:
+        changes["strategy"] = strategy
 
     # 广播配置变更
-    await ws_manager.broadcast({"type": "config_update", "data": changes})
+    await runtime.ws.broadcast({"type": "config_update", "data": changes})
 
     return {
         "message": "配置已更新",
@@ -82,13 +80,17 @@ async def update_collector_config(
 
 
 @router.post("/api/collector/fill-gaps")
-async def fill_data_gaps(hours: int = Query(24, ge=1, le=168)):
+async def fill_data_gaps(
+    hours: int = Query(24, ge=1, le=168),
+    _admin: bool = Depends(require_admin_dep),
+    runtime=Depends(get_runtime),
+):
     """检测数据间隙并采集当前样本以接续序列
 
     注意：数据源仅提供当前现货价，无法回填历史时刻的真实价格，
     因此本接口不会伪造历史数据点，只在存在间隙时采集一个当前样本。
     """
-    collector = get_collector()
+    collector = runtime.collector
     if not collector:
         raise HTTPException(status_code=503, detail="采集器未运行")
 
@@ -106,9 +108,11 @@ async def fill_data_gaps(hours: int = Query(24, ge=1, le=168)):
 
 
 @router.get("/api/collector/gaps")
-async def detect_data_gaps(hours: int = Query(24, ge=1, le=168)):
+async def detect_data_gaps(
+    hours: int = Query(24, ge=1, le=168), runtime=Depends(get_runtime)
+):
     """检测数据间隙"""
-    collector = get_collector()
+    collector = runtime.collector
     if not collector:
         raise HTTPException(status_code=503, detail="采集器未运行")
 

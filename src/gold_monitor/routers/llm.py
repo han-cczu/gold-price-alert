@@ -1,10 +1,9 @@
-"""LLM 配置相关路由：/api/llm/*"""
+"""LLM configuration routes use resources owned by the current application."""
 
+import asyncio
 from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException
-
-from ..llm_config import get_llm_config_manager, ModelProvider
+from ..dependencies import get_runtime, require_admin_dep
 from ..schemas import (
     ProviderProbeRequest,
     ProviderRequest,
@@ -12,33 +11,21 @@ from ..schemas import (
     SetActiveRequest,
     TestConnectionRequest,
 )
-from ..state import require_admin_dep
+from ..services.model_probes import ModelProbeService, ModelProbeError
 
-router = APIRouter()
-
-
-def _resolve_credentials(provider, req_api_key, req_base_url):
-    """解析有效凭据：优先用请求体里（表单未保存）的值；为空或脱敏则回退到已保存配置。"""
-    api_key = (req_api_key or "").strip()
-    if not api_key or "..." in api_key:
-        api_key = provider.api_key
-    base_url = (req_base_url or "").strip() or provider.base_url
-    return api_key, base_url
+router = APIRouter(dependencies=[Depends(require_admin_dep)])
 
 
 @router.get("/api/llm/config")
-async def get_llm_config():
-    """获取 LLM 配置（API Key 脱敏）"""
-    manager = get_llm_config_manager()
-    config = manager.reload_config()  # 强制重新加载
+async def get_llm_config(runtime=Depends(get_runtime)):
+    config = await asyncio.to_thread(runtime.llm_config.reload_config)
     return config.to_safe_dict()
 
 
 @router.get("/api/llm/status")
-async def get_llm_status():
+async def get_llm_status(runtime=Depends(get_runtime)):
     """获取当前 AI 分析使用的状态"""
-    manager = get_llm_config_manager()
-    config = manager.reload_config()
+    config = await asyncio.to_thread(runtime.llm_config.reload_config)
     active_provider = config.get_active_provider()
 
     if not active_provider:
@@ -78,85 +65,52 @@ async def get_llm_status():
 
 
 @router.get("/api/llm/providers")
-async def get_providers():
-    """获取所有模型服务平台"""
-    manager = get_llm_config_manager()
-    config = manager.get_config()
-    return {
-        "providers": [
-            p.to_safe_dict()
-            if isinstance(p, ModelProvider)
-            else ModelProvider(**p).to_safe_dict()
-            for p in config.providers
-        ],
-        "active_provider_id": config.active_provider_id,
-        "active_model": config.active_model,
-    }
+async def get_providers(runtime=Depends(get_runtime)):
+    config = await asyncio.to_thread(runtime.llm_config.get_config)
+    return config.to_safe_dict()
 
 
 @router.post("/api/llm/providers")
-async def add_provider(
-    request: ProviderRequest, _admin: bool = Depends(require_admin_dep)
-):
-    """添加新的模型服务平台"""
-    manager = get_llm_config_manager()
-    provider = manager.add_provider(
-        name=request.name, base_url=request.base_url, api_key=request.api_key or ""
+async def add_provider(request: ProviderRequest, runtime=Depends(get_runtime)):
+    provider = await asyncio.to_thread(
+        runtime.llm_config.add_provider,
+        name=request.name,
+        base_url=request.base_url,
+        api_key=request.api_key or "",
     )
     return {"success": True, "provider": provider.to_safe_dict()}
 
 
 @router.put("/api/llm/providers/{provider_id}")
 async def update_provider(
-    provider_id: str,
-    request: ProviderUpdateRequest,
-    _admin: bool = Depends(require_admin_dep),
+    provider_id: str, request: ProviderUpdateRequest, runtime=Depends(get_runtime)
 ):
-    """更新平台配置"""
-    manager = get_llm_config_manager()
-
-    # 获取当前平台配置
-    current = manager.get_provider(provider_id)
-    if not current:
-        raise HTTPException(status_code=404, detail="平台不存在")
-
-    # 如果 api_key 是脱敏格式或为空，保留原有的
-    new_api_key = request.api_key
-    if not new_api_key or "..." in new_api_key:
-        new_api_key = current.api_key
-
-    provider = manager.update_provider(
-        provider_id, name=request.name, base_url=request.base_url, api_key=new_api_key
+    provider = await asyncio.to_thread(
+        runtime.llm_config.update_provider,
+        provider_id,
+        name=request.name,
+        base_url=request.base_url,
+        api_key=request.api_key,
     )
-
-    if not provider:
+    if provider is None:
         raise HTTPException(status_code=404, detail="平台不存在")
-
     return {"success": True, "provider": provider.to_safe_dict()}
 
 
 @router.delete("/api/llm/providers/{provider_id}")
-async def delete_provider(provider_id: str, _admin: bool = Depends(require_admin_dep)):
-    """删除平台"""
-    # 不允许删除 mock
+async def delete_provider(provider_id: str, runtime=Depends(get_runtime)):
     if provider_id == "mock":
         raise HTTPException(status_code=400, detail="不能删除默认的 Mock 平台")
-
-    manager = get_llm_config_manager()
-    success = manager.delete_provider(provider_id)
-    if not success:
+    if not await asyncio.to_thread(runtime.llm_config.delete_provider, provider_id):
         raise HTTPException(status_code=404, detail="平台不存在")
     return {"success": True, "message": "平台已删除"}
 
 
 @router.post("/api/llm/active")
-async def set_active_provider(
-    request: SetActiveRequest, _admin: bool = Depends(require_admin_dep)
-):
-    """设置当前使用的平台和模型"""
-    manager = get_llm_config_manager()
-    success = manager.set_active(request.provider_id, request.model or "")
-    if not success:
+async def set_active_provider(request: SetActiveRequest, runtime=Depends(get_runtime)):
+    if not await asyncio.to_thread(
+        runtime.llm_config.set_active, request.provider_id, request.model or ""
+    ):
         raise HTTPException(status_code=404, detail="平台不存在")
     return {"success": True, "message": "已切换"}
 
@@ -165,204 +119,38 @@ async def set_active_provider(
 async def fetch_provider_models(
     provider_id: str,
     request: Optional[ProviderProbeRequest] = None,
-    _admin: bool = Depends(require_admin_dep),
+    runtime=Depends(get_runtime),
 ):
-    """获取指定平台的模型列表。
-
-    允许使用表单中尚未保存的 key/url（通过请求体传入），无需先点保存即可获取。
-    """
-    import httpx
-
-    manager = get_llm_config_manager()
-    provider = manager.get_provider(provider_id)
-
-    if not provider:
-        raise HTTPException(status_code=404, detail="平台不存在")
-
-    if provider_id == "mock":
-        return {"success": True, "models": [], "count": 0, "message": "Mock 模式无模型"}
-
-    # 优先用表单当前（未保存）的 key/url，为空或脱敏则回退到已保存配置
-    api_key, base_url = _resolve_credentials(
-        provider,
-        request.api_key if request else None,
-        request.base_url if request else None,
-    )
-
-    if not api_key:
-        raise HTTPException(status_code=400, detail="请先填写 API Key")
-
-    if not base_url:
-        raise HTTPException(status_code=400, detail="请先填写 API 地址")
-
-    # 智能拼接 URL
-    url = base_url.rstrip("/")
-    if not url.endswith("/v1") and "/v1" not in url:
-        models_url = f"{url}/v1/models"
-    else:
-        models_url = f"{url}/models"
-
+    service = ModelProbeService(runtime.llm_config, runtime.config)
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                models_url, headers={"Authorization": f"Bearer {api_key}"}
-            )
-
-            if resp.status_code == 401:
-                raise HTTPException(status_code=401, detail="API Key 无效")
-
-            if resp.status_code != 200:
-                raise HTTPException(
-                    status_code=resp.status_code,
-                    detail=f"获取模型失败: {resp.text[:200]}",
-                )
-
-            data = resp.json()
-            models = data.get("data", [])
-
-            # 提取模型 ID 并排序
-            model_list = []
-            for m in models:
-                model_id = m.get("id", "")
-                if model_id:
-                    model_list.append(
-                        {
-                            "id": model_id,
-                            "owned_by": m.get("owned_by", ""),
-                            "created": m.get("created", 0),
-                        }
-                    )
-
-            # 排序
-            def sort_key(m):
-                id_lower = m["id"].lower()
-                priority = 10
-                if "gpt-4" in id_lower:
-                    priority = 1
-                elif "gpt-3.5" in id_lower:
-                    priority = 2
-                elif "chat" in id_lower:
-                    priority = 3
-                elif "turbo" in id_lower:
-                    priority = 4
-                return (priority, m["id"])
-
-            model_list.sort(key=sort_key)
-
-            # 缓存模型列表
-            manager.update_provider_models(provider_id, [m["id"] for m in model_list])
-
-            return {"success": True, "models": model_list, "count": len(model_list)}
-
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="请求超时")
-    except httpx.RequestError as e:
-        raise HTTPException(status_code=502, detail=f"网络错误: {str(e)}")
+        return await service.fetch_models(
+            provider_id,
+            api_key=request.api_key if request else None,
+            base_url=request.base_url if request else None,
+        )
+    except ModelProbeError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 @router.post("/api/llm/providers/{provider_id}/test")
 async def test_provider_connection(
     provider_id: str,
     request: Optional[TestConnectionRequest] = None,
-    _admin: bool = Depends(require_admin_dep),
+    runtime=Depends(get_runtime),
 ):
-    """测试指定平台的连接 - 简单发送 hi 测试"""
-    manager = get_llm_config_manager()
-    provider = manager.get_provider(provider_id)
-
-    if not provider:
-        raise HTTPException(status_code=404, detail="平台不存在")
-
-    # 优先用表单当前（未保存）的 key/url，为空或脱敏则回退到已保存配置
-    api_key, base_url = _resolve_credentials(
-        provider,
-        request.api_key if request else None,
-        request.base_url if request else None,
-    )
-
-    # 获取要测试的模型
-    test_model = request.model if request and request.model else None
-
-    # 如果没有指定模型，尝试从缓存的模型列表或根据名称推断
-    if not test_model:
-        if provider.models:
-            test_model = provider.models[0]
-        else:
-            provider_name = (provider.name or "").lower()
-            if "deepseek" in provider_name:
-                test_model = "deepseek-chat"
-            elif "qwen" in provider_name or "通义" in provider_name:
-                test_model = "qwen-turbo"
-            elif "moonshot" in provider_name or "kimi" in provider_name:
-                test_model = "moonshot-v1-8k"
-            elif "zhipu" in provider_name or "glm" in provider_name:
-                test_model = "glm-4"
-            elif "openai" in provider_name:
-                test_model = "gpt-4o-mini"
-            # 如果都不匹配，保持 None 让下面的代码处理
-
-    result = {
-        "provider_id": provider_id,
-        "provider_name": provider.name,
-        "model": test_model,
-        "success": False,
-        "message": "",
-        "response": None,
-    }
-
-    if provider_id == "mock":
-        result["success"] = True
-        result["message"] = "Mock 模式无需连接测试"
-        return result
-
-    if not api_key:
-        result["message"] = "未配置 API Key"
-        return result
-
-    if not base_url:
-        result["message"] = "未配置 API 地址"
-        return result
-
-    if not test_model:
-        result["message"] = "请先获取模型列表或手动指定测试模型"
-        return result
-
+    service = ModelProbeService(runtime.llm_config, runtime.config)
     try:
-        from openai import AsyncOpenAI
-        from ..analyzer import OpenAIProvider
-
-        # 标准化 URL
-        normalized_base_url = OpenAIProvider._normalize_base_url(base_url)
-
-        # 创建客户端
-        client = AsyncOpenAI(api_key=api_key, base_url=normalized_base_url)
-
-        # 简单发送 "hi" 测试连接
-        response = await client.chat.completions.create(
-            model=test_model,
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=50,
+        return await service.test_connection(
+            provider_id,
+            api_key=request.api_key if request else None,
+            base_url=request.base_url if request else None,
+            model=request.model if request else None,
         )
-
-        reply = response.choices[0].message.content
-
-        result["success"] = True
-        result["message"] = f"连接成功 (模型: {test_model})"
-        result["response"] = reply[:100] if reply else "OK"
-
-    except Exception as e:
-        result["message"] = f"连接失败: {str(e)}"
-
-    return result
+    except ModelProbeError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 @router.delete("/api/llm/config")
-async def reset_llm_config(_admin: bool = Depends(require_admin_dep)):
-    """重置 LLM 配置（需要管理员权限）"""
-    manager = get_llm_config_manager()
-    success = manager.reset_config()
-
-    if not success:
-        raise HTTPException(status_code=500, detail="重置配置失败")
-
+async def reset_llm_config(runtime=Depends(get_runtime)):
+    await asyncio.to_thread(runtime.llm_config.reset_config)
     return {"message": "配置已重置", "success": True}

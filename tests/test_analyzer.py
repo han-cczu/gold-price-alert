@@ -4,9 +4,14 @@ import pytest
 from datetime import datetime, timedelta, timezone
 
 from gold_monitor.analyzer import (
-    GoldAnalyzer, AnalysisReport, AnalysisContext,
-    MockLLMProvider, create_llm_provider,
-    LLMProvider, OpenAIProvider, SmartAnalysisReport,
+    GoldAnalyzer,
+    AnalysisReport,
+    AnalysisContext,
+    MockLLMProvider,
+    create_llm_provider,
+    LLMProvider,
+    OpenAIProvider,
+    SmartAnalysisReport,
 )
 
 
@@ -40,7 +45,7 @@ async def test_analyze_volatility_upward(analyzer, sample_prices):
         current_price=current_price,
         price_change=price_change,
         recent_prices=sample_prices,
-        time_window_minutes=10
+        time_window_minutes=10,
     )
 
     assert isinstance(report, AnalysisReport)
@@ -70,7 +75,7 @@ async def test_analyze_volatility_downward(analyzer):
         current_price=current_price,
         price_change=price_change,
         recent_prices=prices,
-        time_window_minutes=10
+        time_window_minutes=10,
     )
 
     assert report.market_sentiment in ["偏多", "偏空", "震荡"]
@@ -83,10 +88,7 @@ async def test_analyze_with_zero_price():
 
     with pytest.raises(ValueError, match="当前价格不能为0"):
         await analyzer.analyze_volatility(
-            current_price=0,
-            price_change=0,
-            recent_prices=[],
-            time_window_minutes=5
+            current_price=0, price_change=0, recent_prices=[], time_window_minutes=5
         )
 
 
@@ -94,15 +96,11 @@ def test_format_report_markdown(analyzer):
     """测试 Markdown 报告生成"""
     report = AnalysisReport(
         summary="金价短期上涨，市场情绪偏多",
-        possible_reasons=[
-            "美元指数走弱",
-            "地缘政治风险上升",
-            "通胀预期增强"
-        ],
+        possible_reasons=["美元指数走弱", "地缘政治风险上升", "通胀预期增强"],
         market_sentiment="偏多",
         recommendation="建议逢低买入",
         generated_at=datetime.now(timezone.utc).replace(tzinfo=None),
-        raw_response="[Raw Response]"
+        raw_response="[Raw Response]",
     )
 
     markdown = analyzer.format_report_markdown(report)
@@ -180,9 +178,13 @@ def test_openai_supports_web_search_only_for_official_endpoint():
 
     显式传 tavily_api_key="" 以隔离环境中的 GOLD_TAVILY_API_KEY，保证测试可重复。
     """
-    official = OpenAIProvider(api_key="k", base_url="https://api.openai.com/v1", tavily_api_key="")
+    official = OpenAIProvider(
+        api_key="k", base_url="https://api.openai.com/v1", tavily_api_key=""
+    )
     assert official.supports_web_search() is True
-    third_party = OpenAIProvider(api_key="k", base_url="https://api.deepseek.com", tavily_api_key="")
+    third_party = OpenAIProvider(
+        api_key="k", base_url="https://api.deepseek.com", tavily_api_key=""
+    )
     assert third_party.supports_web_search() is False
 
 
@@ -230,7 +232,10 @@ class _FakeMessage:
                 {
                     "id": tc.id,
                     "type": "function",
-                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    },
                 }
                 for tc in self.tool_calls
             ]
@@ -266,6 +271,7 @@ class _FakeChat:
 
 class _FakeAsyncOpenAI:
     """共享一个 chat 实例，便于断言调用次数"""
+
     _chat = None
 
     def __init__(self, *args, **kwargs):
@@ -277,11 +283,17 @@ async def test_tavily_tool_loop_returns_sources(monkeypatch):
     """首轮发起 web_search tool_call、次轮给终稿；返回正文非空且 sources 含被搜 url"""
     # 首轮：带一个 web_search tool_call；次轮：纯文本终稿
     messages = [
-        _FakeMessage(content=None, tool_calls=[_FakeToolCall("call_1", '{"query": "gold price"}')]),
-        _FakeMessage(content="### 市场概况\n金价上涨\n### 风险提示\n注意风险", tool_calls=None),
+        _FakeMessage(
+            content=None,
+            tool_calls=[_FakeToolCall("call_1", '{"query": "gold price"}')],
+        ),
+        _FakeMessage(
+            content="### 市场概况\n金价上涨\n### 风险提示\n注意风险", tool_calls=None
+        ),
     ]
     _FakeAsyncOpenAI._chat = _FakeChat(messages)
     import openai as openai_mod
+
     monkeypatch.setattr(openai_mod, "AsyncOpenAI", _FakeAsyncOpenAI)
 
     # mock Tavily 搜索（不发真实请求）
@@ -290,10 +302,16 @@ async def test_tavily_tool_loop_returns_sources(monkeypatch):
     async def fake_tavily_search(query, *, api_key, include_domains, max_results=5):
         search_calls.append({"query": query, "api_key": api_key})
         return [
-            {"url": "https://reuters.com/gold", "title": "Gold News", "content": "...", "score": 0.9},
+            {
+                "url": "https://reuters.com/gold",
+                "title": "Gold News",
+                "content": "...",
+                "score": 0.9,
+            },
         ]
 
     import gold_monitor.web_search as web_search_mod
+
     monkeypatch.setattr(web_search_mod, "tavily_search", fake_tavily_search)
 
     provider = OpenAIProvider(
@@ -315,16 +333,21 @@ async def test_tavily_tool_loop_returns_sources(monkeypatch):
 async def test_tavily_tool_loop_degrades_on_search_error(monkeypatch):
     """Tavily 抛错 → _call_llm_with_search 抛出 → 经 smart_analyze 降级并标注"""
     messages = [
-        _FakeMessage(content=None, tool_calls=[_FakeToolCall("call_1", '{"query": "gold price"}')]),
+        _FakeMessage(
+            content=None,
+            tool_calls=[_FakeToolCall("call_1", '{"query": "gold price"}')],
+        ),
     ]
     _FakeAsyncOpenAI._chat = _FakeChat(messages)
     import openai as openai_mod
+
     monkeypatch.setattr(openai_mod, "AsyncOpenAI", _FakeAsyncOpenAI)
 
     async def boom_tavily_search(query, *, api_key, include_domains, max_results=5):
         raise RuntimeError("tavily boom")
 
     import gold_monitor.web_search as web_search_mod
+
     monkeypatch.setattr(web_search_mod, "tavily_search", boom_tavily_search)
 
     # 无联网降级路径需要 _call_llm，monkeypatch 掉避免真实请求
@@ -349,27 +372,38 @@ async def test_tavily_tool_loop_degrades_on_search_error(monkeypatch):
 async def test_tavily_tool_loop_synthesizes_when_rounds_exhausted(monkeypatch):
     """模型每轮都搜索、用尽轮数后，应再做一次无工具终稿调用拿到正文"""
     tool_msgs = [
-        _FakeMessage(content=None, tool_calls=[_FakeToolCall(f"c{i}", '{"query": "gold"}')])
+        _FakeMessage(
+            content=None, tool_calls=[_FakeToolCall(f"c{i}", '{"query": "gold"}')]
+        )
         for i in range(OpenAIProvider.MAX_TOOL_ROUNDS)
     ]
-    final_msg = _FakeMessage(content="### 市场概况\n基于搜索的终稿\n### 风险提示\n注意", tool_calls=None)
+    final_msg = _FakeMessage(
+        content="### 市场概况\n基于搜索的终稿\n### 风险提示\n注意", tool_calls=None
+    )
     _FakeAsyncOpenAI._chat = _FakeChat(tool_msgs + [final_msg])
     import openai as openai_mod
+
     monkeypatch.setattr(openai_mod, "AsyncOpenAI", _FakeAsyncOpenAI)
 
     async def fake_tavily_search(query, *, api_key, include_domains, max_results=5):
         return [{"url": "https://kitco.com/g", "title": "G", "content": "c"}]
 
     import gold_monitor.web_search as web_search_mod
+
     monkeypatch.setattr(web_search_mod, "tavily_search", fake_tavily_search)
 
-    provider = OpenAIProvider(api_key="k", base_url="https://api.deepseek.com", tavily_api_key="tvly-x")
+    provider = OpenAIProvider(
+        api_key="k", base_url="https://api.deepseek.com", tavily_api_key="tvly-x"
+    )
     text, sources = await provider._call_llm_with_search("prompt")
 
     assert "终稿" in text
     assert any("kitco.com" in s["url"] for s in sources)
     # MAX_TOOL_ROUNDS 轮工具调用 + 1 次无工具终稿
-    assert len(_FakeAsyncOpenAI._chat.completions.calls) == OpenAIProvider.MAX_TOOL_ROUNDS + 1
+    assert (
+        len(_FakeAsyncOpenAI._chat.completions.calls)
+        == OpenAIProvider.MAX_TOOL_ROUNDS + 1
+    )
 
 
 @pytest.mark.asyncio
@@ -390,9 +424,12 @@ async def test_mock_provider_response():
         price_change_percent=1.0,
         time_window_minutes=5,
         recent_prices=[
-            (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=5), 2030.0),
-            (datetime.now(timezone.utc).replace(tzinfo=None), 2050.0)
-        ]
+            (
+                datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=5),
+                2030.0,
+            ),
+            (datetime.now(timezone.utc).replace(tzinfo=None), 2050.0),
+        ],
     )
 
     report = await provider.analyze(context)
@@ -416,7 +453,9 @@ async def test_anthropic_provider_uses_first_text_block(monkeypatch):
 
     class _Messages:
         async def create(self, **kwargs):
-            return type("Message", (), {"content": [_BlockWithoutText(), _TextBlock()]})()
+            return type(
+                "Message", (), {"content": [_BlockWithoutText(), _TextBlock()]}
+            )()
 
     class _Client:
         def __init__(self, **kwargs):
@@ -428,3 +467,75 @@ async def test_anthropic_provider_uses_first_text_block(monkeypatch):
     provider = AnthropicProvider(api_key="k")
 
     assert await provider._call_llm("prompt") == "文本结果"
+
+
+@pytest.mark.asyncio
+async def test_tavily_available_but_unused_is_marked_without_search(monkeypatch):
+    """Configuring a search tool does not prove the model used it."""
+    _FakeAsyncOpenAI._chat = _FakeChat(
+        [
+            _FakeMessage(
+                content="### 市场概况\n固定样本\n### 风险提示\n基础风险",
+                tool_calls=None,
+            )
+        ]
+    )
+    import openai
+
+    monkeypatch.setattr(openai, "AsyncOpenAI", _FakeAsyncOpenAI)
+    provider = OpenAIProvider(
+        api_key="fake-key",
+        base_url="https://example.invalid",
+        tavily_api_key="fake-search-key",
+    )
+    report = await provider.smart_analyze()
+    assert report.web_search_used is False
+    assert report.sources == []
+    assert "未启用联网搜索" in report.risk_warning
+
+
+@pytest.mark.asyncio
+async def test_provider_closes_sdk_client_when_call_fails(monkeypatch):
+    closed = []
+
+    class Messages:
+        async def create(self, **kwargs):
+            raise RuntimeError("fake SDK failure")
+
+    class Client:
+        def __init__(self, **kwargs):
+            self.messages = Messages()
+
+        async def close(self):
+            closed.append(True)
+
+    import anthropic
+    from gold_monitor.analyzer import AnthropicProvider
+
+    monkeypatch.setattr(anthropic, "AsyncAnthropic", Client)
+    with pytest.raises(RuntimeError, match="fake SDK failure"):
+        await AnthropicProvider(api_key="fake-key")._call_llm("prompt")
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_tavily_backend_closes_client_on_failure(monkeypatch):
+    closed = []
+
+    class Client:
+        def __init__(self, api_key):
+            pass
+
+        async def search(self, **kwargs):
+            raise RuntimeError("fake search failure")
+
+        async def close(self):
+            closed.append(True)
+
+    import tavily
+    from gold_monitor.web_search import tavily_search
+
+    monkeypatch.setattr(tavily, "AsyncTavilyClient", Client)
+    with pytest.raises(RuntimeError, match="fake search failure"):
+        await tavily_search("gold", api_key="fake", include_domains=[])
+    assert closed == [True]

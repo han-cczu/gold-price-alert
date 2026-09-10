@@ -12,7 +12,7 @@ COPY pyproject.toml .
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir --upgrade pip "setuptools>=83.0.0"
 
 COPY src/ src/
 COPY README.md .
