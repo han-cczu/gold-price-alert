@@ -51,7 +51,7 @@ class AlertMonitor:
         self._db = database
         self._lock = asyncio.Lock()
         config = config if config is not None else settings
-        self._channels = (
+        self._channels: list[NotificationChannel] = (
             list(channels) if channels is not None else [ConsoleNotification()]
         )
         self._threshold_upper = (

@@ -2,6 +2,8 @@
 
 日期：2026-09-09。状态：阶段 0–5 已交付并完成本地验收；阶段 6 的 Docker 验收受环境阻碍。
 
+2026-09-10 补充：已创建 [PR #2](https://github.com/han-cczu/gold-price-alert/pull/2)。首轮 GitHub 测试和 Docker 镜像构建通过，合并前修正下述 CI 环境问题，并新增容器启动检查；最终合并检查以 PR 中的结果为准。
+
 本记录对应分支 `codex/modular-refactor` 的代码提交 `4a103ad`。重构前业务快照为 `5e2fa7f`；实施基线 `03c606f` 在此基础上增加计划文档。全套测试为 193 项通过，提交记录见本文件所属 Git 历史。本轮按模块并行开发后集成：`4a103ad` 提交代码、测试和构建配置，后续文档提交记录契约与验证结果；没有形成原计划所述的逐阶段小提交序列。
 
 ## 1. 实现范围
@@ -139,6 +141,13 @@ node --test tests/frontend/*.test.mjs
 ### Docker 阻碍
 
 本机 Docker Desktop 引擎未能启动，客户端找不到 `dockerDesktopLinuxEngine` named pipe。backend 日志另有 Inference manager socket 路径访问失败。当前证据只支持“本机引擎不可用、容器验收未完成”；没有证明项目镜像可以成功构建或容器可正常运行，也未将日志中的错误推断为唯一根因。
+
+### 2026-09-10 合并前 CI 环境修正
+
+- 首轮 CI 自动安装 Ruff 0.16.6，本地基线使用 0.15.5。Ruff 的次版本可改变默认规则和格式，详见[官方版本约定](https://docs.astral.sh/ruff/versioning/)。项目将开发依赖和 `required-version` 同时固定为已验收的 0.15.5，避免本地与 CI 使用不同检查规则；升级须单独验收。
+- MyPy 2.3.1 对条件表达式中的通知列表推断更窄，已显式标注为 `list[NotificationChannel]`，保留不同渠道实现的原有运行行为。
+- 安全扫描曾安装但未使用 `safety`，它引入了有漏洞的 `nltk`；该依赖不属于项目运行依赖。删除这个无用工具，并将 runner 和镜像虚拟环境的 `setuptools` 升级至扫描报告要求的 83.0.0 或以上。
+- 保留 `pip check` 和无忽略项的 `pip-audit`，扫描当前安装环境中的全部项目依赖；发现漏洞仍阻断检查。Docker job 额外启动构建后的 Mock 容器，验证健康状态、报价和打包后的页面资源。
 
 ## 6. 部署范围与待完成项
 
