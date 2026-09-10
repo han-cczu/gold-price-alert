@@ -2,6 +2,7 @@
 
 import pytest
 from datetime import datetime, timedelta, timezone
+from gold_monitor.analysis.parser import parse_response
 
 from gold_monitor.analyzer import (
     GoldAnalyzer,
@@ -539,3 +540,39 @@ async def test_tavily_backend_closes_client_on_failure(monkeypatch):
     with pytest.raises(RuntimeError, match="fake search failure"):
         await tavily_search("gold", api_key="fake", include_domains=[])
     assert closed == [True]
+
+
+def test_local_parser_preserves_advice_body_and_list_items():
+    response = """1. **波动原因分析**
+- 市场情绪转弱，建议关注成交量。
+- 美元走强。
+2. **市场情绪判断**
+- 上涨乏力，目前偏空。
+3. **短期展望**
+价格可能继续调整。
+4. **操作建议**
+建议减仓，等待走势稳定后再评估。
+- 设置止损，控制回撤。
+1. 避免加杠杆。
+"""
+    report = parse_response(response)
+    assert report.possible_reasons == ["市场情绪转弱，建议关注成交量。", "美元走强。"]
+    assert report.market_sentiment == "偏空"
+    assert report.recommendation == (
+        "建议减仓，等待走势稳定后再评估。\n- 设置止损，控制回撤。\n1. 避免加杠杆。"
+    )
+    assert report.raw_response == response
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        "### 市场情绪：偏空\n### 操作建议：建议减仓。",
+        "2. **市场情绪判断**: 偏空\n4. **操作建议**: 建议减仓。",
+        "**市场情绪：**偏空\n**操作建议：**建议减仓。",
+    ],
+)
+def test_local_parser_accepts_inline_section_content(response):
+    report = parse_response(response)
+    assert report.market_sentiment == "偏空"
+    assert report.recommendation == "建议减仓。"

@@ -1,8 +1,10 @@
 """告警模块测试"""
 
 import io
+import asyncio
 import shutil
 import tempfile
+import threading
 
 import pytest
 from datetime import datetime, timedelta, timezone
@@ -288,3 +290,101 @@ async def test_console_notification_handles_narrow_console_encoding(monkeypatch)
     )
 
     assert await notification.send(alert) is True
+
+
+@pytest.fixture
+def isolated_alert_db():
+    db = Database("sqlite:///:memory:")
+    db.create_tables()
+    yield db
+    db.close()
+
+
+@pytest.mark.parametrize(
+    "failed_type", [AlertType.THRESHOLD_UPPER, AlertType.BREAKOUT_UP]
+)
+async def test_partial_alert_write_returns_and_delivers_only_committed_alerts(
+    isolated_alert_db, monkeypatch, failed_type
+):
+    db = isolated_alert_db
+    channel = MockNotification()
+    monitor = AlertMonitor(
+        db,
+        channels=[channel],
+        threshold_upper=110,
+        threshold_lower=0,
+        volatility_percent=1,
+    )
+    for price in (108, 108.5, 109):
+        assert await monitor.check_price(PriceData(price, source="test")) == []
+    original = db.save_alert_with_state
+
+    def fail_selected(alert_type, *args, **kwargs):
+        if alert_type == failed_type.value:
+            raise OSError("temporary alert write failure")
+        return original(alert_type, *args, **kwargs)
+
+    monkeypatch.setattr(db, "save_alert_with_state", fail_selected)
+    alerts = await monitor.check_price(PriceData(110, source="test"))
+    await monitor.wait_pending_notifications()
+    committed_type = (
+        AlertType.BREAKOUT_UP
+        if failed_type == AlertType.THRESHOLD_UPPER
+        else AlertType.THRESHOLD_UPPER
+    )
+    assert [alert.alert_type for alert in alerts] == [committed_type]
+    assert [alert.alert_type for alert in channel.sent_alerts] == [committed_type]
+    records = db.get_alerts()
+    assert [record.alert_type for record in records] == [committed_type.value]
+    assert db.get_notification_logs()[0].alert_id == records[0].id
+    assert monitor._should_alert(failed_type)
+    assert not monitor._should_alert(committed_type)
+
+    monkeypatch.setattr(db, "save_alert_with_state", original)
+    recovered = await monitor.check_price(PriceData(111, source="test"))
+    await monitor.wait_pending_notifications()
+    assert [alert.alert_type for alert in recovered] == [failed_type]
+    assert len(db.get_alerts()) == len(channel.sent_alerts) == 2
+
+
+async def test_cancellation_during_second_alert_keeps_both_commits_and_deliveries(
+    isolated_alert_db, monkeypatch
+):
+    db = isolated_alert_db
+    channel = MockNotification()
+    monitor = AlertMonitor(
+        db,
+        channels=[channel],
+        threshold_upper=110,
+        threshold_lower=0,
+        volatility_percent=1,
+    )
+    for price in (108, 108.5, 109):
+        await monitor.check_price(PriceData(price, source="test"))
+    entered, release = threading.Event(), threading.Event()
+    original = db.save_alert_with_state
+
+    def block_second(alert_type, *args, **kwargs):
+        if alert_type == AlertType.BREAKOUT_UP.value:
+            entered.set()
+            assert release.wait(timeout=3)
+        return original(alert_type, *args, **kwargs)
+
+    monkeypatch.setattr(db, "save_alert_with_state", block_second)
+    task = asyncio.create_task(monitor.check_price(PriceData(110, source="test")))
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+    finally:
+        release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await monitor.wait_pending_notifications()
+    expected = {AlertType.THRESHOLD_UPPER, AlertType.BREAKOUT_UP}
+    assert {alert.alert_type for alert in channel.sent_alerts} == expected
+    assert {record.alert_type for record in db.get_alerts()} == {
+        t.value for t in expected
+    }
+    assert len(db.get_notification_logs()) == 2

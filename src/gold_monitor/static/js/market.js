@@ -66,24 +66,33 @@ export function createMarket({ request, onExchangeRate }) {
     }
 
     async function fetchBankPrices() {
+        const container = document.getElementById('bank-cards');
+        const baseline = document.getElementById('london-gold-price');
         try {
             const data = await request('/api/bank-prices');
-            const container = document.getElementById('bank-cards');
-            container.innerHTML = data.data.map(bank => {
+            const validPrice = value => Number.isFinite(value) && value > 0;
+            if (!Array.isArray(data.data) || !data.data.length || !validPrice(data.london_gold_cny)
+                || data.data.some(bank => !validPrice(bank.buy_price) || !validPrice(bank.sell_price) || bank.sell_price < bank.buy_price)) {
+                container.textContent = '银行参考报价暂不可用';
+                baseline.textContent = '暂不可用';
+                return;
+            }
+            const stale = data.is_fallback || data.is_stale;
+            const status = stale ? `<div class="bank-quote-status">参考缓存 · 上次成功更新：${formatTimestamp(data.updated_at)}</div>` : '';
+            container.innerHTML = status + data.data.map(bank => {
                 const color = BANK_COLORS[bank.bank_name] || '#666';
                 return `<div class="bank-card">
                     <div class="bank-name" style="color:${color};border-color:${color}">${escapeHtml(bank.bank_name)}</div>
-                    <div class="price-row"><span class="price-label">买入价</span><span class="price-value">¥${Number(bank.buy_price).toFixed(2)}</span></div>
-                    <div class="price-row"><span class="price-label">卖出价</span><span class="price-value">¥${Number(bank.sell_price).toFixed(2)}</span></div>
+                    <div class="price-row"><span class="price-label">买入价</span><span class="price-value">¥${bank.buy_price.toFixed(2)}</span></div>
+                    <div class="price-row"><span class="price-label">卖出价</span><span class="price-value">¥${bank.sell_price.toFixed(2)}</span></div>
                     <div class="spread">价差: ¥${(bank.sell_price - bank.buy_price).toFixed(2)}</div>
                 </div>`;
             }).join('');
-            if (!data.data.length) container.textContent = '暂无银行报价';
-            document.getElementById('london-gold-price').textContent = `¥${Number(data.london_gold_cny).toFixed(2)}/克`;
+            baseline.textContent = `¥${data.london_gold_cny.toFixed(2)}/克${stale ? '（参考缓存）' : ''}`;
         } catch (error) {
             showError(error);
-            const container = document.getElementById('bank-cards');
-            if (container.querySelector('.loading')) container.textContent = '银行报价暂不可用';
+            container.textContent = '银行参考报价暂不可用';
+            baseline.textContent = '暂不可用';
         }
     }
 

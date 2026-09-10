@@ -21,11 +21,18 @@ services:
       - GOLD_FETCH_INTERVAL=${GOLD_FETCH_INTERVAL:-30}
       - GOLD_DATABASE_URL=sqlite:///data/gold_prices.db
       - GOLD_GOLDAPI_KEY=${GOLD_GOLDAPI_KEY:-}
+      - GOLD_PRICE_HEARTBEAT_SECONDS=${GOLD_PRICE_HEARTBEAT_SECONDS:-300}
+      - GOLD_DATA_RETENTION_DAYS=${GOLD_DATA_RETENTION_DAYS:-30}
+      - GOLD_BACKUP_ENABLED=${GOLD_BACKUP_ENABLED:-false}
+      - GOLD_BACKUP_INTERVAL_HOURS=${GOLD_BACKUP_INTERVAL_HOURS:-24}
+      - GOLD_BACKUP_KEEP_COUNT=${GOLD_BACKUP_KEEP_COUNT:-7}
+      - GOLD_BACKUP_PATH=/app/data/backups
       
       # 告警
       - GOLD_ALERT_THRESHOLD_PERCENT=${GOLD_ALERT_THRESHOLD_PERCENT:-1.0}
       - GOLD_ALERT_PRICE_UPPER=${GOLD_ALERT_PRICE_UPPER:-2500.0}
       - GOLD_ALERT_PRICE_LOWER=${GOLD_ALERT_PRICE_LOWER:-1800.0}
+      - GOLD_ALERT_VOLATILITY_WINDOW=${GOLD_ALERT_VOLATILITY_WINDOW:-5}
       
       # 大模型
       - GOLD_LLM_PROVIDER=${GOLD_LLM_PROVIDER:-mock}
@@ -53,8 +60,9 @@ services:
       - GOLD_ENCRYPT_API_KEYS=${GOLD_ENCRYPT_API_KEYS:-true}
       - GOLD_CORS_ALLOW_ORIGINS=${GOLD_CORS_ALLOW_ORIGINS:-}
       - GOLD_RATE_LIMIT_PER_MINUTE=${GOLD_RATE_LIMIT_PER_MINUTE:-60}
+      - GOLD_TRUSTED_PROXY_IPS=${GOLD_TRUSTED_PROXY_IPS:-127.0.0.1}
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
+      test: ["CMD", "python", "-m", "gold_monitor.healthcheck"]
       interval: 30s
       timeout: 10s
       retries: 3

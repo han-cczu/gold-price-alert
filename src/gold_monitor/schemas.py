@@ -92,9 +92,11 @@ class BankPriceResponse(UTCResponse):
 
 class BankPricesResponse(UTCResponse):
     data: list[BankPriceResponse]
-    base_price_cny: float
-    london_gold_cny: float
-    updated_at: datetime
+    base_price_cny: Optional[float] = None
+    london_gold_cny: Optional[float] = None
+    updated_at: Optional[datetime] = None
+    is_fallback: bool = False
+    is_stale: bool = False
 
 
 class ProviderRequest(BaseModel):

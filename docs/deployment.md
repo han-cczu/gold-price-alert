@@ -2,7 +2,7 @@
 
 本文按当前 [docker-compose.yml](../docker-compose.yml)、[Dockerfile](../Dockerfile) 和 [CLI](../src/gold_monitor/cli.py) 编写。应用是一个内建采集、告警和定时分析的 Web 服务。
 
-本轮尚未完成 Docker 构建与运行验收：本机 Docker Desktop 引擎启动失败，客户端找不到 `dockerDesktopLinuxEngine` 管道。下列命令是当前配置对应的操作方式，不代表容器已经通过运行验证。已执行的检查和剩余事项见 [重构验证记录](refactor-validation.md)。
+基线 `05802d0` 已通过 [GitHub CI 的镜像构建和隔离 Mock 容器运行检查](https://github.com/han-cczu/gold-price-alert/actions/runs/34442124715)。本机 Docker Desktop 引擎仍不可用；本次可靠性修复的验证结果单独记录在 [修复与验证记录](reliability-fixes.md)，不沿用基线结果作为新代码的容器验收。
 
 ## 1. 运行方式
 
@@ -70,6 +70,7 @@ docker compose --profile production up -d --build
 | `GOLD_LLM_CONFIG_PATH` | 模型配置文件路径，Compose 默认 `/app/data/llm_config.json` |
 | `GOLD_CORS_ALLOW_ORIGINS` | 允许跨域的来源；空值按当前同源使用 |
 | `GOLD_RATE_LIMIT_PER_MINUTE` | 每分钟请求限制，Compose 默认 60 |
+| `GOLD_TRUSTED_PROXY_IPS` | CLI 启动时交给 Uvicorn 的可信代理 IP/CIDR，默认只信任 `127.0.0.1` |
 
 可在本机分别生成两个随机值填入管理员凭证和主密钥：
 
@@ -85,22 +86,27 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 |------|------------|------------|
 | SQLite 数据库 | `/app/data/gold_prices.db` | `gold_data` named volume 挂载 `/app/data` |
 | 模型配置 | 默认 `/app/data/llm_config.json` | 使用默认路径时包含在 `gold_data` 内 |
-| API 创建的备份 | 默认 `/app/backups/` | 当前 Compose 没有挂载该目录，需要导出备份或自行配置持久目录 |
+| 手动及自动备份 | `/app/data/backups/`；自动快照位于 `automatic/` 子目录 | 包含在 `gold_data` 中；仍应定期复制到独立存储 |
 | Nginx 配置 | `/etc/nginx/nginx.conf` | 从项目 `nginx.conf` 只读挂载 |
 | TLS 证书 | `/etc/nginx/ssl/` | 从项目 `ssl/` 只读挂载 |
 
 Compose 明确设置 `GOLD_DATABASE_URL=sqlite:///data/gold_prices.db`。仅修改宿主机 `.env` 中同名值不会替换这一固定项；本地 Python 运行才会直接使用本地 Settings 读取的数据库 URL。生产模板中的其他数据库示例不表示当前 Compose 已配置或验证该数据库。
 
-Compose 的 `.env` 用于替换文件中明确引用的 `${...}`。它不会把所有 `GOLD_*` 自动注入容器；例如当前文件没有透传 `GOLD_BACKUP_PATH` 或数据保留参数。需要调整这类配置时，应在自己的 Compose 覆盖文件中显式添加环境项和必要的目录挂载。
+Compose 的 `.env` 用于替换文件中明确引用的 `${...}`，不会把所有 `GOLD_*` 自动注入容器。现已透传数据保留天数、同价采样间隔、自动备份开关、备份周期和保留份数；备份路径固定为 `/app/data/backups`，需要改变时请同步调整 Compose 环境项与持久目录挂载。
+
+从旧版升级前，先导出旧容器 `/app/backups/` 中已有快照；新默认路径不会迁移旧文件，重建旧容器会丢失未导出的容器内文件。
 
 ### 行情、分析和通知
 
 - `GOLD_DATA_SOURCE` 支持 `mock`、`sina`、`goldapi`、`fallback`；GoldAPI 使用 `GOLD_GOLDAPI_KEY`，采集间隔使用 `GOLD_FETCH_INTERVAL`。Mock 为模拟数据，不是实时行情。
+- `fallback` 仅在真实数据源间切换，每次按 GoldAPI（有密钥时）、Sina 的优先级尝试；每源默认最多 10 秒，主源恢复后重新使用主源。全部失败时明确报不可用，不自动改用 Mock。
+- 同价去重默认每 300 秒保存一个真实采样，通过 `GOLD_PRICE_HEARTBEAT_SECONDS` 调整；不会生成虚构的历史点。
 - 首次没有模型配置文件时，Settings 根据 `GOLD_LLM_PROVIDER`、`GOLD_ANTHROPIC_API_KEY`、`GOLD_OPENAI_API_KEY` 等初始化默认配置；无有效密钥时使用 Mock。
 - 已保存模型文件的优先级高于 Settings 默认值。修改环境变量不会自动改写已保存的平台选择；可在页面切换/重置模型配置。代码中显式传入 provider 时，显式选择优先。
 - `GOLD_OPENAI_BASE_URL` 配置兼容端点；`GOLD_TAVILY_API_KEY` 用于已实现的搜索路径。模型是否真正搜索以响应中的标记和来源为准。
 - 邮件使用 `GOLD_SMTP_*` 与 `GOLD_ALERT_EMAIL_TO`；Webhook 使用 `GOLD_WEBHOOK_URL/GOLD_WEBHOOK_TYPE`；Telegram 使用 `GOLD_TELEGRAM_BOT_TOKEN/GOLD_TELEGRAM_CHAT_ID`。上述项已在当前 Compose 中透传。
 - 通知以 Settings 为默认值，再应用数据库保存的启用状态和字段覆盖。页面保存、测试发送和实际告警使用同一解析路径；启用某渠道后再用测试功能检查该部署环境下的真实连通性。
+- 启用鉴权后，新建本地/智能分析需要管理员凭证；已有智能分析缓存可公开读取。成功结果保存到分析历史，共享的智能分析任务只保存一份记录。
 
 详细优先级、币种和时间约定见 [README](../README.md) 与 [验证记录](refactor-validation.md)。
 
@@ -126,6 +132,8 @@ docker compose --profile production exec nginx nginx -s reload
 
 当前 Compose 仍将应用端口直接映射到宿主机。需要只通过代理访问时，应按部署环境调整端口绑定或访问规则。
 
+限流不直接相信客户端的 `X-Forwarded-For`。经代理访问时，将 `GOLD_TRUSTED_PROXY_IPS` 设置为实际代理的地址或受控 CIDR，由 Uvicorn 验证代理并解析客户端地址；不要对仍允许公网直连的应用设置 `*`。默认只信任回环地址，因此未配置的 Docker Nginx 会共用一个限流身份。使用独立 `uvicorn gold_monitor.web:app` 命令时，改用 Uvicorn 的 `--forwarded-allow-ips` 参数或进程环境变量 `FORWARDED_ALLOW_IPS`。
+
 ## 4. 监控、备份与更新
 
 ### 状态和日志
@@ -136,7 +144,7 @@ docker compose ps
 docker compose logs --tail=100 gold-monitor
 ```
 
-`/health` 返回数据库连接状态、`collector_running`、采集统计、最后价格和时间等信息。当前容器 healthcheck 只检查该接口的 HTTP 成功状态；判断数据源是否正常，还应查看 JSON 中的 `data_source_healthy`、连续失败数和最后更新时间。不要把容器运行中等同于上游行情可用。
+`/health` 返回数据库连接状态、`collector_running`、采集统计、最后价格和时间。仅数据库连通、采集任务运行、最近采样成功且未超过 `max(30秒, 3 × 当前采集间隔)` 时返回 HTTP 200，其余返回 503。容器通过 `python -m gold_monitor.healthcheck` 同时检查 HTTP 和健康 JSON。数据源故障会使容器标记为 unhealthy；Docker 的 `restart: unless-stopped` 本身不会因 unhealthy 自动重启容器。
 
 ### SQLite 一致性备份
 
@@ -152,12 +160,18 @@ curl --fail --request POST \
 
 ```bash
 mkdir -p backup
-docker cp gold-monitor:/app/backups/manual.db ./backup/manual.db
+docker cp gold-monitor:/app/data/backups/manual.db ./backup/manual.db
 ```
 
 不要把直接复制运行中的原始 SQLite 文件当成一致性备份，尤其数据库可能使用 WAL。当前备份接口通过 SQLite backup API 生成快照。模型配置文件与主密钥也需要单独保管；仅有数据库文件不足以恢复全部应用配置。
 
 离线恢复方法要求先停止所有数据库使用者并关闭数据库连接，验证文件后恢复，且不提供 HTTP 恢复路由。具体方法及非 SQLite 的 `prices_only` 导出范围见 [验证记录](refactor-validation.md)。
+
+### 自动快照
+
+`GOLD_BACKUP_ENABLED=true` 后，应用启动时执行一次快照，此后每 `GOLD_BACKUP_INTERVAL_HOURS` 小时执行（默认 24）。`GOLD_BACKUP_KEEP_COUNT` 默认 7，仅轮转 `automatic/` 子目录内应用生成的快照；新备份失败时保留全部旧快照，手动备份不参与轮转。生产模板开启自动备份，未使用模板时应用默认关闭。
+
+自动快照与手动快照均使用已有数据库一致性备份实现。数据库快照不包含模型配置文件或主密钥，不能替代完整应用备份；同一个数据卷内的快照也不能防止整卷丢失。
 
 ### 更新、端口和持久数据
 
@@ -173,7 +187,7 @@ docker compose up -d --build gold-monitor
 
 ## 5. 当前限制
 
-- 本轮没有完成 Docker 引擎可用后的镜像构建、容器启动及完整接口验证，最终状态以 [验证记录](refactor-validation.md) 为准。
+- 基线的隔离 Mock 容器检查已通过；本次修复及真实服务验证范围见 [修复记录](reliability-fixes.md)。
 - 单进程限制适用于本地与容器运行；当前没有独立后台 worker、分布式调度或通知持久队列。
 - 通知结果会入库，但进程异常退出后不保证补发或恰好发送一次。
-- 当前仅清理过期原始报价，小时/日聚合未实现；定时清理不是定时备份。需要定时备份时，由部署方安排对备份接口的调用并保存产物。
+- 当前仅清理过期原始报价，小时/日聚合未实现，对应两个配置项仅兼容保留；自动备份使用独立调度，不依赖清理任务。

@@ -40,7 +40,7 @@ docker compose logs -f
 # 3. 访问 http://localhost:8000
 ```
 
-本轮重构尚未完成 Docker 构建与运行验收：本机 Docker Desktop 引擎启动失败。此处是项目提供的运行方式，实际验证状态见 [重构验证记录](docs/refactor-validation.md)。
+基线 `05802d0` 已通过 GitHub CI 的镜像构建及隔离 Mock 容器运行检查。本次可靠性修复的验收状态见 [修复与验证记录](docs/reliability-fixes.md)。
 
 ### 运行方式与部署范围
 
@@ -77,15 +77,19 @@ GOLD_LLM_CONFIG_PATH=llm_config.json
 
 通知配置使用当前应用的环境默认值，再应用已保存的渠道启用状态和字段覆盖。保存配置、测试发送、实际告警使用同一解析路径；变更对后续发送生效。启用 `GOLD_ENABLE_AUTH` 后，在页面设置中填写对应管理员凭证，页面统一发送 `X-Admin-Key`，凭证只保留在当前页面内存中。
 
+启用鉴权时，新建 AI 分析需要管理员凭证，已有智能分析缓存仍可公开读取。限流使用服务器验证的客户端地址；反向代理部署请配置 `GOLD_TRUSTED_PROXY_IPS`，详见 [部署指南](docs/deployment.md)。
+
 设置 `GOLD_ENCRYPT_API_KEYS=true` 时，必须配置稳定的 `GOLD_SECRET_KEY` 并在重启后保留同一值，否则已有密文无法读取。模型配置文件损坏、解密失败或写入失败会明确报错。
 
 ## 数据含义
 
 - 主图表、告警阈值和本地波动分析以 **USD/oz** 为单位；本地分析和图表先筛选 USD，原始历史仍保留其他币种记录。
+- `fallback` 仅使用真实源，每轮重新尝试高优先级来源；全部失败时明确报错，Mock 只在显式选择时使用。同价报价默认每 300 秒保存一次真实采样，可用 `GOLD_PRICE_HEARTBEAT_SECONDS` 调整。
 - 图表最多返回 2000 个绘图点，覆盖整个所选时间窗口并保留首尾及分桶峰谷；高低价、均价、涨跌幅和 `count` 使用完整窗口数据。`count` 是原始入库样本数，不是绘图点数。
 - API、WebSocket 和导出的时间带 UTC `Z`；旧无时区时间按 UTC 解释，界面转换为浏览器本地时间。
-- 银行卡片目前使用国际金价/汇率与预设价差生成参考报价，未接入银行真实挂牌接口。Mock 模式下使用模拟数据；汇率接口会返回回退和过期标记。
+- 银行卡片目前使用国际金价/汇率与预设价差生成参考报价，未接入银行真实挂牌接口。Mock 模式下使用模拟数据；银行参考价和汇率接口均标记回退/过期。银行基准获取失败时保留上次成功时间，没有有效报价时显示不可用。
 - 检测到历史间隙时只能补充当前报价，不能还原历史价格。SQLite 备份支持一致性快照；非 SQLite 的 JSON 兼容导出仅包含价格记录。离线恢复要求先关闭数据库，详见 [备份和验证说明](docs/refactor-validation.md)。
+- `GOLD_BACKUP_ENABLED=true` 启用启动及周期自动快照，默认每 24 小时执行、保留最近 7 份自动快照。Compose 的备份路径 `/app/data/backups` 位于持久卷内，手动快照不参与自动轮转。
 
 ## 命令行参数
 
@@ -160,6 +164,7 @@ gold-price-alert/
 - [API 契约与兼容字段](docs/api-contract.md)
 - [重构计划与验收清单](docs/refactoring-plan.md)
 - [本轮交付、验证结果与限制](docs/refactor-validation.md)
+- [可靠性修复范围与回归记录](docs/reliability-fixes.md)
 
 ## License
 

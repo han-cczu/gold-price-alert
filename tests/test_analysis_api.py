@@ -356,4 +356,5 @@ def test_model_list_probe_uses_unsaved_form_and_fixed_errors(
     provider = app.state.runtime.llm_config.get_provider("openai")
     assert provider.api_key == ""
     if expected == 200:
-        assert provider.models == ["fixture-model"]
+        assert response.json()["models"][0]["id"] == "fixture-model"
+        assert provider.models == []

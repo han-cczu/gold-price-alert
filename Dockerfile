@@ -42,11 +42,12 @@ ENV GOLD_DATABASE_URL=sqlite:///data/gold_prices.db
 ENV GOLD_DATA_SOURCE=mock
 ENV GOLD_LLM_PROVIDER=mock
 ENV GOLD_FETCH_INTERVAL=30
+ENV GOLD_BACKUP_PATH=/app/data/backups
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD python -c "import httpx; r=httpx.get('http://localhost:8000/health'); r.raise_for_status(); print(r.json())"
+    CMD python -m gold_monitor.healthcheck
 
 # 直接启动 Web 服务（内置数据采集）
 CMD ["gold-monitor", "--host", "0.0.0.0", "--port", "8000"]

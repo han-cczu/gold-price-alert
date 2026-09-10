@@ -72,5 +72,6 @@ nul
 
 # 备份文件
 backup/
+backups/
 *.bak
 .ace-tool/

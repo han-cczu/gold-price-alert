@@ -13,6 +13,24 @@ export function formatTimestamp(value, options = {}) {
     return Number.isNaN(date.getTime()) ? '时间未知' : date.toLocaleString('zh-CN', options);
 }
 
+/** Keep sub-millisecond identity separate from the browser's plotting clock. */
+function preciseTime(value) {
+    const date = parseUtc(value);
+    const time = date.getTime();
+    if (!Number.isFinite(time)) return { time };
+    const fraction = typeof value === 'string' ? value.match(/T\d{2}:\d{2}:\d{2}\.(\d+)/)?.[1] || '' : '';
+    const remainder = fraction.slice(3).replace(/0+$/, '');
+    const precision = remainder.padEnd(6, '0');
+    return {
+        time, precision, key: `${time}:${precision}`,
+        timestamp: date.toISOString().replace(/Z$/, `${remainder}Z`),
+    };
+}
+
+function comparePoints(a, b) {
+    return a.time - b.time || a.precision.localeCompare(b.precision);
+}
+
 export function convertUnitPrice(price, { fromUnit = 'OZ', toUnit = 'G', fromCurrency = 'USD', toCurrency = 'CNY', usdCny = 7.2 } = {}) {
     const from = UNIT_FACTORS[fromUnit.toUpperCase()];
     const to = UNIT_FACTORS[toUnit.toUpperCase()];
@@ -26,7 +44,7 @@ export function summarize(points) {
     const current = prices.at(-1) ?? 0;
     const first = prices[0] ?? 0;
     return {
-        timestamps: points.map(point => new Date(point.time).toISOString()), prices,
+        timestamps: points.map(point => point.timestamp ?? new Date(point.time).toISOString()), prices,
         current_price: current, price_change: current - first,
         price_change_percent: first > 0 ? (current - first) / first * 100 : 0,
         high: prices.length ? prices.reduce((maximum, price) => Math.max(maximum, price), -Infinity) : 0,
@@ -63,7 +81,7 @@ export class QuoteState {
     acceptSnapshot(token, data) {
         if (token.version !== this.version || token.period !== this.period) return false;
         if (!Array.isArray(data.timestamps) || !Array.isArray(data.prices) || data.timestamps.length !== data.prices.length) throw new Error('图表数据格式无效');
-        const points = data.timestamps.map((value, i) => ({ time: parseUtc(value).getTime(), price: data.prices[i] }));
+        const points = data.timestamps.map((value, i) => ({ ...preciseTime(value), price: data.prices[i] }));
         if (points.some(point => !Number.isFinite(point.time) || !Number.isFinite(point.price))) throw new Error('图表包含无效的时间或价格');
         const recentEvents = this.events.filter(point => point.sequence > token.sequence);
         this.livePoints.clear();
@@ -78,6 +96,7 @@ export class QuoteState {
             this.baseline = {
                 points, stats: Object.fromEntries(fields.map(field => [field, data[field]])),
                 firstTime: points[0]?.time ?? Infinity, lastTime: points.at(-1)?.time ?? -Infinity,
+                lastPoint: points.at(-1),
                 windowStart, windowEnd,
             };
             for (const point of recentEvents) if (point.recorded) this.accumulate(point);
@@ -91,11 +110,11 @@ export class QuoteState {
     }
     acceptPrice(data) {
         const point = {
-            time: parseUtc(data.timestamp).getTime(), price: data.price,
+            ...preciseTime(data.timestamp), price: data.price,
             sequence: ++this.sequence, recorded: data.recorded !== false,
         };
         if (!Number.isFinite(point.time) || !Number.isFinite(point.price)) return false;
-        if (!this.latestQuote || point.time >= this.latestQuote.time) this.latestQuote = point;
+        if (!this.latestQuote || comparePoints(point, this.latestQuote) >= 0) this.latestQuote = point;
         this.events.push(point);
         this.events = this.events.slice(-1000);
         if (!point.recorded) return true;
@@ -107,9 +126,9 @@ export class QuoteState {
     }
     accumulate(point) {
         if (point.time < this.baseline.windowStart) return;
-        if (point.time > this.baseline.lastTime) this.livePoints.set(point.time, point);
+        if (!this.baseline.lastPoint || comparePoints(point, this.baseline.lastPoint) > 0) this.livePoints.set(point.key, point);
         else {
-            const existing = this.baseline.points.find(sample => sample.time === point.time);
+            const existing = this.baseline.points.find(sample => sample.key === point.key);
             // An older unseen record may already be included in the aggregates.
             // Query again rather than guessing whether it changes the full count.
             if (!existing || existing.price !== point.price) this.dirty = true;
@@ -123,15 +142,15 @@ export class QuoteState {
     merge(points) {
         const start = this.now() - PERIOD_HOURS[this.period] * 3600000;
         const unique = new Map();
-        for (const point of points) if (point.time >= start) unique.set(point.time, point);
-        return [...unique.values()].sort((a, b) => a.time - b.time);
+        for (const point of points) if (point.time >= start) unique.set(point.key, point);
+        return [...unique.values()].sort(comparePoints);
     }
     snapshot() {
         this.points = this.merge(this.points);
         const samples = summarize(this.points);
-        if (!this.baseline) return this.withLatestQuote(samples, this.points.at(-1)?.time ?? -Infinity);
+        if (!this.baseline) return this.withLatestQuote(samples, this.points.at(-1));
         const stats = { ...this.baseline.stats };
-        const live = [...this.livePoints.values()].sort((a, b) => a.time - b.time);
+        const live = [...this.livePoints.values()].sort(comparePoints);
         if (live.length) {
             const liveStats = summarize(live);
             const firstPrice = stats.count ? stats.current_price - stats.price_change : live[0].price;
@@ -149,11 +168,11 @@ export class QuoteState {
             window_start: new Date(this.baseline.windowStart).toISOString(),
             window_end: new Date(Math.max(this.baseline.windowEnd, live.at(-1)?.time ?? 0)).toISOString(),
             needs_refresh: this.needsRefresh,
-        }, Math.max(this.baseline.lastTime, live.at(-1)?.time ?? -Infinity));
+        }, live.at(-1) ?? this.baseline.lastPoint);
     }
-    withLatestQuote(stats, lastRecordedTime) {
+    withLatestQuote(stats, lastRecordedPoint) {
         const quote = this.latestQuote;
-        if (!quote || quote.recorded || quote.time <= lastRecordedTime) return stats;
+        if (!quote || quote.recorded || (lastRecordedPoint && comparePoints(quote, lastRecordedPoint) <= 0)) return stats;
         // Latest received prices may be deduplicated rather than stored. They
         // change the headline only; the history and its aggregates remain exact.
         const firstPrice = stats.count ? stats.current_price - stats.price_change : quote.price;

@@ -1,5 +1,7 @@
 """数据源测试"""
 
+import asyncio
+
 import pytest
 from gold_monitor.data_sources.mock import MockDataSource
 from gold_monitor.data_sources.base import BaseDataSource, PriceData
@@ -104,3 +106,83 @@ def test_source_factory_uses_instance_configuration():
 def test_fallback_requires_positive_retry_count(retries):
     with pytest.raises(ValueError):
         FallbackDataSource([_AlwaysFail()], max_retries=retries)
+
+
+def test_production_fallback_contains_only_real_sources():
+    from gold_monitor.config import Settings
+    from gold_monitor.data_sources.factory import (
+        create_data_source,
+        create_fallback_source,
+    )
+
+    config = Settings(_env_file=None, data_source="fallback", goldapi_key="test-only")
+    fallback = create_fallback_source(config)
+    assert [source.name for source in fallback._sources] == ["goldapi", "sina"]
+    without_key = create_fallback_source(config.model_copy(update={"goldapi_key": ""}))
+    assert [source.name for source in without_key._sources] == ["sina"]
+    assert isinstance(create_data_source("mock", config), MockDataSource)
+
+
+async def test_fallback_rechecks_primary_after_recovery():
+    class RecoveringSource(_AlwaysFail):
+        healthy = False
+        calls = 0
+
+        async def fetch_price(self):
+            self.calls += 1
+            if not self.healthy:
+                raise ConnectionError("temporary outage")
+            return PriceData(2300, source=self.name)
+
+    primary, backup = RecoveringSource("primary"), RecoveringSource("backup")
+    backup.healthy = True
+    fallback = FallbackDataSource([primary, backup])
+    assert (await fallback.fetch_price()).source == "backup"
+    primary.healthy = True
+    assert (await fallback.fetch_price()).source == "primary"
+    assert fallback.active_source is primary
+    assert primary.calls == 3 and backup.calls == 1
+
+
+@pytest.mark.parametrize("price", [float("nan"), float("inf"), 0, -1])
+async def test_invalid_primary_quote_uses_valid_backup(price):
+    class InvalidPrice(_AlwaysFail):
+        async def fetch_price(self):
+            return PriceData(price, source=self.name)
+
+    fallback = FallbackDataSource([InvalidPrice(), MockDataSource(base_price=2300)])
+    assert (await fallback.fetch_price()).source == "mock"
+
+
+async def test_cancelled_fallback_drains_child_without_starting_backup():
+    started, cancelled = asyncio.Event(), asyncio.Event()
+
+    class HangingSource(_AlwaysFail):
+        async def fetch_price(self):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+    class UnusedBackup(_AlwaysFail):
+        calls = 0
+
+        async def fetch_price(self):
+            self.calls += 1
+            return PriceData(2300, source=self.name)
+
+    backup = UnusedBackup("backup")
+    fallback = FallbackDataSource([HangingSource("primary"), backup])
+    task = asyncio.create_task(fallback.fetch_price())
+    await asyncio.wait_for(started.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert cancelled.is_set() and backup.calls == 0
+
+
+@pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf"), True])
+def test_fallback_rejects_invalid_source_budget(timeout):
+    with pytest.raises(ValueError):
+        FallbackDataSource([_AlwaysFail()], source_timeout=timeout)

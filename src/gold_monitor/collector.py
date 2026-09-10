@@ -17,6 +17,7 @@ from .models import Database
 from inspect import isawaitable
 
 from .data_sources.base import BaseDataSource, PriceData, close_data_source
+from .data_sources.fallback import FallbackDataSource
 from .data_sources.factory import (
     create_data_source as create_data_source,
     create_all_sources as create_all_sources,
@@ -64,6 +65,7 @@ class AdvancedCollector:
         gap_detection: bool = True,
         gap_threshold_minutes: int = 5,  # 超过此间隔视为数据间隙
         config: Settings | None = None,
+        dedupe_max_interval_seconds: int | None = None,
     ):
         self._config = config if config is not None else settings
         if dedupe_threshold < 0 or not isfinite(dedupe_threshold):
@@ -75,6 +77,13 @@ class AdvancedCollector:
         self._on_price_update = on_price_update
         self._deduplicate = deduplicate
         self._dedupe_threshold = dedupe_threshold
+        heartbeat = (
+            self._config.price_heartbeat_seconds
+            if dedupe_max_interval_seconds is None
+            else dedupe_max_interval_seconds
+        )
+        self._validate_interval(heartbeat)
+        self._dedupe_max_interval = timedelta(seconds=heartbeat)
         self._gap_detection = gap_detection
         self._gap_threshold = timedelta(minutes=gap_threshold_minutes)
 
@@ -210,6 +219,9 @@ class AdvancedCollector:
             "strategy": self._strategy.value,
             "deduplicate": self._deduplicate,
             "dedupe_threshold": self._dedupe_threshold,
+            "dedupe_max_interval_seconds": int(
+                self._dedupe_max_interval.total_seconds()
+            ),
             "gap_detection": self._gap_detection,
             "gap_threshold_minutes": self._gap_threshold.total_seconds() / 60,
             "sources": [s.name for s in self._sources] if self._sources else [],
@@ -318,10 +330,11 @@ class AdvancedCollector:
         start_time = asyncio.get_event_loop().time()
 
         try:
-            price_data = await asyncio.wait_for(
-                source.fetch_price(),
-                timeout=10.0,  # 10秒超时
-            )
+            if isinstance(source, FallbackDataSource):
+                # Fallback owns a separate bounded budget for each real source.
+                price_data = await source.fetch_price()
+            else:
+                price_data = await asyncio.wait_for(source.fetch_price(), timeout=10.0)
             latency = (asyncio.get_event_loop().time() - start_time) * 1000
 
             if not isfinite(price_data.price) or price_data.price <= 0:
@@ -392,7 +405,7 @@ class AdvancedCollector:
             if price_data is None:
                 raise ConnectionError("所有数据源均获取失败")
 
-            saved = self._should_save(price_data.price) or (
+            saved = self._should_save(price_data.price, price_data.timestamp) or (
                 self._last_saved_price is not None
                 and self._last_saved_price.currency != price_data.currency
             )
@@ -422,12 +435,20 @@ class AdvancedCollector:
             logger.error("数据采集失败: %s", e)
             return FetchResult(None, error=str(e))
 
-    def _should_save(self, new_price: float) -> bool:
-        """判断是否应该保存（去重逻辑）"""
+    def _should_save(self, new_price: float, timestamp: datetime | None = None) -> bool:
+        """Deduplicate price changes while retaining periodic real observations."""
         if not self._deduplicate:
             return True
 
         if self._last_saved_price is None:
+            return True
+
+        previous_time = self._last_saved_price.timestamp
+        if (
+            timestamp is not None
+            and previous_time is not None
+            and timestamp - previous_time >= self._dedupe_max_interval
+        ):
             return True
 
         price_diff = abs(new_price - self._last_saved_price.price)

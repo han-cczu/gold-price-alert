@@ -5,6 +5,9 @@ import hashlib
 import logging
 import os
 import secrets
+import time
+from collections import OrderedDict, deque
+from collections.abc import Callable
 from typing import Optional
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -166,25 +169,39 @@ class APIKeyAuth:
 class RateLimiter:
     """简单的内存限流器"""
 
-    def __init__(self, requests_per_minute: int = 60):
+    def __init__(
+        self,
+        requests_per_minute: int = 60,
+        *,
+        max_clients: int = 10000,
+        clock: Callable[[], float] = time.monotonic,
+    ):
+        if requests_per_minute < 1 or max_clients < 1:
+            raise ValueError("限流配额和客户端容量必须大于0")
         self._limit = requests_per_minute
-        self._requests: dict[str, list[float]] = {}
+        self._max_clients = max_clients
+        self._clock = clock
+        self._requests: OrderedDict[str, deque[float]] = OrderedDict()
         self._window = 60.0  # 1分钟窗口
 
     def _get_client_id(self, request: Request) -> str:
-        """获取客户端标识"""
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
+        """Trust the ASGI peer; trusted proxy handling belongs to the server."""
         return request.client.host if request.client else "unknown"
 
     def _cleanup_old_requests(self, client_id: str, now: float):
-        """清理过期的请求记录"""
-        if client_id in self._requests:
-            cutoff = now - self._window
-            self._requests[client_id] = [
-                t for t in self._requests[client_id] if t > cutoff
-            ]
+        """Expire inactive identities as well as the current client's samples."""
+        cutoff = now - self._window
+        # Identities are ordered by their last accepted request. Removing only
+        # expired entries preserves every live client's quota at capacity.
+        while self._requests:
+            oldest = next(iter(self._requests.values()))
+            if oldest[-1] > cutoff:
+                break
+            self._requests.popitem(last=False)
+        samples = self._requests.get(client_id)
+        if samples is not None:
+            while samples and samples[0] <= cutoff:
+                samples.popleft()
 
     def is_allowed(self, request: Request) -> tuple[bool, int]:
         """检查是否允许请求
@@ -192,15 +209,15 @@ class RateLimiter:
         Returns:
             (allowed, remaining): 是否允许, 剩余配额
         """
-        import time
-
-        now = time.time()
+        now = self._clock()
         client_id = self._get_client_id(request)
 
         self._cleanup_old_requests(client_id, now)
 
         if client_id not in self._requests:
-            self._requests[client_id] = []
+            if len(self._requests) >= self._max_clients:
+                return False, 0
+            self._requests[client_id] = deque()
 
         request_count = len(self._requests[client_id])
 
@@ -208,6 +225,7 @@ class RateLimiter:
             return False, 0
 
         self._requests[client_id].append(now)
+        self._requests.move_to_end(client_id)
         return True, self._limit - request_count - 1
 
     async def check(self, request: Request):

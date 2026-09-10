@@ -200,14 +200,18 @@ class DataLifecycleManager:
         assert name is not None
         return Path(name).resolve()
 
-    def _backup_destination(self, name: str, extension: str) -> Path:
+    def _backup_destination(
+        self, name: str, extension: str, automatic: bool = False
+    ) -> Path:
         if (
             name in {".", ".."}
             or Path(name).name != name
             or not _SAFE_BACKUP_NAME.fullmatch(name)
         ):
             raise ValueError("非法备份名称：只能使用字母、数字、点、下划线和短横线")
-        root = self._backup_path.resolve()
+        root = (
+            self._backup_path / "automatic" if automatic else self._backup_path
+        ).resolve()
         destination = (root / f"{name}{extension}").resolve()
         if destination.parent != root or destination == self._sqlite_path():
             raise ValueError("非法备份名称：备份不能覆盖当前数据库或写出备份目录")
@@ -227,7 +231,9 @@ class DataLifecycleManager:
         _atomic_file(destination, write)
         return destination.stat().st_size
 
-    async def backup_database(self, backup_name: str | None = None) -> BackupResult:
+    async def backup_database(
+        self, backup_name: str | None = None, *, automatic: bool = False
+    ) -> BackupResult:
         result: BackupResult = {
             "success": False,
             "backup_path": None,
@@ -235,10 +241,12 @@ class DataLifecycleManager:
             "backup_time": iso_utc(utcnow()),
         }
         try:
-            name = backup_name or f"gold_prices_{utcnow().strftime('%Y%m%d_%H%M%S')}"
+            if automatic and backup_name is not None:
+                raise ValueError("自动备份名称由应用生成")
+            name = backup_name or f"gold_prices_{utcnow().strftime('%Y%m%d_%H%M%S_%f')}"
             extension = ".db" if self._is_sqlite else ".json"
             destination = await asyncio.to_thread(
-                self._backup_destination, name, extension
+                self._backup_destination, name, extension, automatic
             )
             if self._is_sqlite:
                 result["size_bytes"] = await self._db.run(
@@ -265,16 +273,54 @@ class DataLifecycleManager:
             result["error"] = str(error)
         return result
 
+    def _prune_automatic_backups(self, keep_count: int, newest: Path) -> None:
+        root = (self._backup_path / "automatic").resolve()
+        if not root.is_dir():
+            return
+        generated = re.compile(r"^gold_prices_\d{8}_\d{6}_\d{6}\.(db|json)$")
+        files = sorted(
+            (
+                file
+                for file in root.iterdir()
+                if file.is_file()
+                and not file.is_symlink()
+                and file.resolve().parent == root
+                and file.resolve() != self._sqlite_path()
+                and generated.fullmatch(file.name)
+            ),
+            # A clock adjustment must never delete the just-created snapshot.
+            key=lambda file: (file.resolve() == newest.resolve(), file.name),
+            reverse=True,
+        )
+        for file in files[keep_count:]:
+            file.unlink()
+
+    async def automatic_backup(self, keep_count: int = 7) -> BackupResult:
+        """Rotate only app-generated snapshots, and only after a successful backup."""
+        if keep_count < 1:
+            raise ValueError("自动备份至少保留一份")
+        result = await self.backup_database(automatic=True)
+        if result["success"]:
+            assert result["backup_path"] is not None
+            await asyncio.to_thread(
+                self._prune_automatic_backups, keep_count, Path(result["backup_path"])
+            )
+        return result
+
     def _list_backups(self) -> list[BackupInfo]:
         backups: list[BackupInfo] = []
         if not self._backup_path.exists():
             return backups
-        for file in self._backup_path.iterdir():
+        files = list(self._backup_path.iterdir())
+        automatic = self._backup_path / "automatic"
+        if automatic.is_dir():
+            files.extend(automatic.iterdir())
+        for file in files:
             if file.is_file() and file.suffix in (".db", ".json"):
                 stat = file.stat()
                 backups.append(
                     {
-                        "name": file.name,
+                        "name": file.relative_to(self._backup_path).as_posix(),
                         "path": str(file),
                         "size_bytes": stat.st_size,
                         "created_at": iso_utc(

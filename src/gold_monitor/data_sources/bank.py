@@ -1,6 +1,8 @@
 """银行金价数据源 - 获取各大银行实时金价"""
 
+import asyncio
 import logging
+import math
 import httpx
 import re
 from datetime import datetime, timezone
@@ -50,9 +52,21 @@ class BankGoldDataSource(BaseDataSource):
         {"code": "CMB", "name": "招商银行", "spread": 0.65},
     ]
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._client: httpx.AsyncClient | None = None
-        self._base_price_cny: float = 550.0  # 基础金价 CNY/g
+        self._base_price_cny: float | None = None
+        self._international_price: float | None = None
+        self._updated_at: datetime | None = None
+        self._last_fetch_failed = True
+        self._fetch_lock = asyncio.Lock()
+
+    @property
+    def updated_at(self) -> datetime | None:
+        return self._updated_at
+
+    @property
+    def is_fallback(self) -> bool:
+        return self._last_fetch_failed
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -65,19 +79,34 @@ class BankGoldDataSource(BaseDataSource):
 
     async def fetch_price(self) -> PriceData:
         """获取基准金价（用于计算银行金价）"""
-        # 这里返回模拟的基准价格
+        await self.fetch_base_price_cny()
+        if self._international_price is None or self._updated_at is None:
+            raise ValueError("银行基准价暂不可用")
         return PriceData(
-            price=self._base_price_cny * 31.1035,  # 转换为 USD/oz
+            price=self._international_price,
             currency="USD",
-            timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
+            timestamp=self._updated_at,
             source=self.name,
         )
 
-    async def fetch_base_price_cny(self) -> float:
+    @staticmethod
+    def _positive_finite(value, label: str) -> float:
+        if isinstance(value, bool):
+            raise ValueError(f"无效的{label}")
+        number = float(value)
+        if not math.isfinite(number) or number <= 0:
+            raise ValueError(f"无效的{label}")
+        return number
+
+    async def fetch_base_price_cny(self) -> float | None:
         """获取基础金价（CNY/克）
 
-        从新浪财经获取实时国际金价，结合实时汇率计算
+        只有行情与汇率均有效时才发布新快照；失败保留原值和原成功时间。
         """
+        async with self._fetch_lock:
+            return await self._fetch_base_price_cny()
+
+    async def _fetch_base_price_cny(self) -> float | None:
         try:
             client = self._get_client()
 
@@ -89,31 +118,46 @@ class BankGoldDataSource(BaseDataSource):
             sina_resp = await client.get(
                 "https://hq.sinajs.cn/list=hf_GC", headers=sina_headers, timeout=5.0
             )
-            international_price = 2050.0  # 默认值
-            if sina_resp.status_code == 200:
-                match = re.search(r'hq_str_hf_GC="([^"]+)"', sina_resp.text)
-                if match:
-                    data = match.group(1).split(",")
-                    international_price = float(data[0]) if data[0] else float(data[1])
+            sina_resp.raise_for_status()
+            if sina_resp.status_code != 200:
+                raise ValueError("行情接口未返回完整报价")
+            match = re.search(r'hq_str_hf_GC="([^"]+)"', sina_resp.text)
+            if not match:
+                raise ValueError("无法解析银行基准行情")
+            data = match.group(1).split(",")
+            international_price = self._positive_finite(
+                data[0] if data[0] else data[1], "国际金价"
+            )
 
             # 2. 获取实时汇率
             rate_resp = await client.get(
                 "https://api.exchangerate-api.com/v4/latest/USD", timeout=5.0
             )
-            usd_cny = 7.2  # 默认汇率
-            if rate_resp.status_code == 200:
-                rate_data = rate_resp.json()
-                usd_cny = rate_data.get("rates", {}).get("CNY", 7.2)
+            rate_resp.raise_for_status()
+            if rate_resp.status_code != 200:
+                raise ValueError("汇率接口未返回完整数据")
+            usd_cny = self._positive_finite(rate_resp.json()["rates"]["CNY"], "汇率")
 
             # 3. 计算人民币克价
             # 1 盎司 = 31.1035 克
-            self._base_price_cny = (international_price * usd_cny) / 31.1035
+            base_price = self._positive_finite(
+                (international_price * usd_cny) / 31.1035, "人民币基准价"
+            )
+            if any(round(base_price - bank["spread"], 2) <= 0 for bank in self.BANKS):
+                raise ValueError("银行参考买入价必须大于零")
+            self._base_price_cny = base_price
+            self._international_price = international_price
+            self._updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            self._last_fetch_failed = False
 
         except Exception as e:
+            self._last_fetch_failed = True
             logger.warning(
-                "获取银行基准金价失败，沿用上次值 %.2f CNY/g: %s",
-                self._base_price_cny,
-                e,
+                "获取银行基准金价失败，%s: %s",
+                "沿用上次成功报价"
+                if self._base_price_cny is not None
+                else "暂无有效报价",
+                type(e).__name__,
             )
 
         return self._base_price_cny
@@ -121,7 +165,8 @@ class BankGoldDataSource(BaseDataSource):
     async def fetch_all_bank_prices(self) -> list[BankGoldPrice]:
         """获取所有银行金价"""
         base_price = await self.fetch_base_price_cny()
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        if base_price is None or self._updated_at is None:
+            return []
 
         prices = []
         for bank in self.BANKS:
@@ -136,7 +181,7 @@ class BankGoldDataSource(BaseDataSource):
                     bank_code=bank["code"],
                     buy_price=buy_price,
                     sell_price=sell_price,
-                    timestamp=now,
+                    timestamp=self._updated_at,
                     product_name="Au99.99",
                 )
             )
