@@ -1,32 +1,53 @@
 import { escapeHtml, renderMarkdown } from "./render.js";
 import { formatTimestamp } from "./state.js";
 
-export function createAnalysis({ request, onOpenSettings }) {
+export function createAnalysis({ request, onOpenSettings, canAdministrate = () => true }) {
     // 智能分析数据
     let smartAnalysisData = null;
     let requestVersion = 0;
 
+    // Without administrator access the public configuration summary labels the
+    // card; provider management stays behind the settings dialog.
+    async function publicStatus() {
+        const config = await request('/api/config');
+        const model = config.llm_model || '';
+        return {
+            enabled: Boolean(config.llm_enabled),
+            provider_name: config.llm_provider_name || config.llm_provider || 'Mock',
+            model: model || '(默认模型)',
+            active_model: model,
+            models: model ? [model] : [],
+            message: '当前为模拟分析；填写管理员凭证后可配置模型',
+        };
+    }
+
+    async function savedModels() {
+        if (!canAdministrate()) return publicStatus();
+        const config = await request('/api/llm/providers');
+        const active = (config.providers || []).find(provider => provider.id === config.active_provider_id);
+        return { models: active?.models || [], active_model: config.active_model || '' };
+    }
+
     // These reads use saved metadata; live provider probes belong to settings.
     async function loadAnalysisModels() {
+        const select = document.getElementById('analysis-model-select');
         try {
-            const config = await request('/api/llm/providers');
-            const active = (config.providers || []).find(provider => provider.id === config.active_provider_id);
-            const select = document.getElementById('analysis-model-select');
+            const { models, active_model } = await savedModels();
             select.replaceChildren(new Option('默认模型', ''));
-            for (const id of active?.models || []) select.appendChild(new Option(id, id));
-            if (config.active_model) {
-                if (![...select.options].some(option => option.value === config.active_model)) select.appendChild(new Option(config.active_model, config.active_model));
-                select.value = config.active_model;
+            for (const id of models) select.appendChild(new Option(id, id));
+            if (active_model) {
+                if (![...select.options].some(option => option.value === active_model)) select.appendChild(new Option(active_model, active_model));
+                select.value = active_model;
             }
         } catch (error) {
-            document.getElementById('analysis-model-select').replaceChildren(new Option(error.message, ''));
+            select.replaceChildren(new Option(error.message, ''));
         }
     }
 
     async function fetchAIStatus() {
         const text = document.getElementById('ai-status-text');
         try {
-            const status = await request('/api/llm/status');
+            const status = canAdministrate() ? await request('/api/llm/status') : await publicStatus();
             const color = status.enabled ? '#4CAF50' : '#ff9800';
             document.getElementById('ai-status-icon').style.color = color;
             document.getElementById('ai-status-bar').style.background = status.enabled ? 'rgba(76,175,80,0.3)' : 'rgba(255,152,0,0.3)';

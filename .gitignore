@@ -75,3 +75,7 @@ backup/
 backups/
 *.bak
 .ace-tool/
+
+# 个人工具配置（编辑器 / 助手的本地设置与计划）
+.claude/settings.local.json
+.cursor/

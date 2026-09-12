@@ -13,6 +13,7 @@ from math import isfinite
 from typing import Callable, Optional
 
 from .config import Settings, settings
+from .metrics import record_fetch
 from .models import Database
 from inspect import isawaitable
 
@@ -345,6 +346,7 @@ class AdvancedCollector:
                 source_stats.last_latency_ms = latency
                 source_stats.total_latency_ms += latency
                 source_stats.last_success_at = utcnow()
+            record_fetch(source.name, True, latency / 1000)
 
             return (source.name, price_data, latency)
 
@@ -352,12 +354,14 @@ class AdvancedCollector:
             if source_stats:
                 source_stats.failure_count += 1
                 source_stats.last_error = "超时"
+            record_fetch(source.name, False, 0.0)
             return (source.name, None, 0)
 
         except Exception as e:
             if source_stats:
                 source_stats.failure_count += 1
                 source_stats.last_error = str(e)
+            record_fetch(source.name, False, 0.0)
             return (source.name, None, 0)
 
     async def _fetch_parallel_first(self) -> Optional[PriceData]:
@@ -562,23 +566,3 @@ class AdvancedCollector:
         """重启采集器"""
         await self.stop()
         self.start(interval)
-
-
-# ============ 兼容旧版 API ============
-
-# 别名，保持向后兼容
-PriceCollector = AdvancedCollector
-
-# 全局采集器实例
-_collector: Optional[AdvancedCollector] = None
-
-
-def get_collector() -> Optional[AdvancedCollector]:
-    """获取全局采集器实例"""
-    return _collector
-
-
-def set_collector(collector: AdvancedCollector):
-    """设置全局采集器实例"""
-    global _collector
-    _collector = collector

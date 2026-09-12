@@ -9,7 +9,9 @@ import { showError, showNotification } from './render.js';
 const api = createApiClient({ onError: showError });
 const chart = createChart(api);
 const market = createMarket({ request: api.request, onExchangeRate: chart.setExchangeRate });
-const analysis = createAnalysis({ request: api.request, onOpenSettings: () => settings.openSettings() });
+let authEnabled = false;
+const canAdministrate = () => !authEnabled || api.hasAdminKey();
+const analysis = createAnalysis({ request: api.request, onOpenSettings: () => settings.openSettings(), canAdministrate });
 const refreshAnalysisConfig = () => Promise.allSettled([analysis.fetchAIStatus(), analysis.loadAnalysisModels(), analysis.fetchSmartAnalysis()]);
 const settings = createSettings({ request: api.request, onChanged: refreshAnalysisConfig });
 
@@ -75,8 +77,14 @@ function updateDateTime() {
 chart.init();
 market.init();
 updateDateTime();
+async function loadSecurityStatus() {
+    // Public: tells anonymous pages not to call administrator-only endpoints.
+    try { authEnabled = Boolean((await api.request('/api/security/status')).auth_enabled); }
+    catch { authEnabled = false; }
+}
 // Each section can load even if an independent section fails.
-Promise.allSettled([chart.fetchChartData(), market.fetchExchangeRate(), market.fetchHistory(), market.fetchBankPrices(), market.fetchAlerts(), refreshAnalysisConfig()]);
+Promise.allSettled([chart.fetchChartData(), market.fetchExchangeRate(), market.fetchHistory(), market.fetchBankPrices(), market.fetchAlerts()]);
+loadSecurityStatus().then(refreshAnalysisConfig);
 realtime.start();
 
 const intervals = [

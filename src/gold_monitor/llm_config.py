@@ -403,8 +403,3 @@ def get_llm_config_manager() -> LLMConfigManager:
     if _config_manager is None:
         _config_manager = LLMConfigManager()
     return _config_manager
-
-
-def get_llm_config() -> LLMConfig:
-    """获取当前 LLM 配置"""
-    return get_llm_config_manager().get_config()

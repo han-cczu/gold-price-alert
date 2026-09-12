@@ -270,3 +270,70 @@ def test_price_queries_filter_currency_before_order_and_limit(database):
             start, end, 1, currency="USD", offset=1
         )
     ] == [2003]
+
+
+def test_create_tables_adds_indexes_to_databases_from_earlier_releases(tmp_path):
+    """create_all 不会给已存在的表补索引；启动时必须单独补建并保持幂等。"""
+    import sqlite3
+
+    path = tmp_path / "legacy.db"
+    with sqlite3.connect(path) as legacy:
+        legacy.execute(
+            "CREATE TABLE gold_prices (id INTEGER PRIMARY KEY, price FLOAT NOT NULL, "
+            "currency VARCHAR(10), source VARCHAR(50), timestamp DATETIME)"
+        )
+        legacy.execute(
+            "INSERT INTO gold_prices (price, currency, source, timestamp) "
+            "VALUES (2000, 'USD', 'legacy', '2026-01-01 00:00:00')"
+        )
+    database = Database(f"sqlite:///{path.as_posix()}")
+    try:
+        for _ in range(2):
+            database.create_tables()
+        with sqlite3.connect(path) as inspect_db:
+            names = {
+                row[0]
+                for row in inspect_db.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'index'"
+                )
+            }
+        assert {
+            "ix_gold_prices_timestamp",
+            "ix_gold_prices_currency_timestamp",
+            "ix_alert_records_triggered_at",
+            "ix_notification_logs_sent_at",
+            "ix_analysis_records_created_at",
+        } <= names
+        assert database.get_latest_price().price == 2000
+    finally:
+        database.close()
+
+
+def test_chart_sampling_keeps_the_earliest_of_equal_extremes(database):
+    """同一桶内并列的最高/最低价保留最早一条，采样结果与统计一致且确定。"""
+    start = datetime(2026, 1, 1)
+    prices = [2000, 2500, 2500, 1500, 1500, 2000] * 50 + [2100]
+    with database.get_session() as session:
+        session.add_all(
+            [
+                GoldPrice(
+                    price=price,
+                    timestamp=start + timedelta(minutes=index),
+                    source="test",
+                    currency="USD",
+                )
+                for index, price in enumerate(prices)
+            ]
+        )
+        session.commit()
+    end = start + timedelta(minutes=len(prices) - 1)
+    result = database.get_chart_data(start, end, max_points=12)
+    assert result["count"] == len(prices)
+    assert result["high"] == 2500 and result["low"] == 1500
+    assert max(result["prices"]) == 2500 and min(result["prices"]) == 1500
+    assert result["prices"][0] == prices[0] and result["prices"][-1] == prices[-1]
+    assert len(result["prices"]) <= 12
+    timestamps = result["timestamps"]
+    assert timestamps == sorted(timestamps)
+    assert len(set(timestamps)) == len(timestamps)
+    assert result == database.get_chart_data(start, end, max_points=12)

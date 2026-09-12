@@ -9,6 +9,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from ..collection.stats import freshness_limit_seconds
 from ..dependencies import get_runtime
 from ..schemas import HealthResponse
 from ..metrics import get_metrics, get_metrics_content_type, update_db_records
@@ -76,7 +77,7 @@ async def health_check(response: Response, runtime=Depends(get_runtime)):
         and collector.stats.consecutive_failures == 0
         and 0
         <= (as_utc(utcnow()) - as_utc(last_success)).total_seconds()
-        <= max(30, interval * 3)
+        <= freshness_limit_seconds(interval)
     )
     healthy = status == "connected" and running and source_healthy
     response.status_code = 200 if healthy else 503
@@ -106,6 +107,8 @@ async def get_config(runtime=Depends(get_runtime)):
         "alert_price_upper": config.alert_price_upper,
         "alert_price_lower": config.alert_price_lower,
         "llm_provider": active.id if active else "mock",
+        "llm_provider_name": active.name if active else "Mock",
+        "llm_enabled": bool(active and active.id != "mock" and active.api_key),
         "llm_model": llm.active_model or None,
     }
 

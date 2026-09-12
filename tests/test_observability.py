@@ -169,3 +169,44 @@ def test_cli_passes_configured_trusted_proxy_addresses(monkeypatch):
     run_server(host="127.0.0.1", port=9876)
     assert recorded[0]["proxy_headers"] is True
     assert recorded[0]["forwarded_allow_ips"] == "192.0.2.9"
+
+
+async def test_collection_delivery_and_database_metrics_are_recorded(app_settings):
+    """指标记录函数必须真正接线，否则 /metrics 里的相关序列永远为空。"""
+    from gold_monitor.alerts.types import Alert, AlertType
+    from gold_monitor.metrics import (
+        DB_OPERATION_LATENCY,
+        FETCH_TOTAL,
+        NOTIFICATION_TOTAL,
+    )
+    from gold_monitor.notifications.delivery import NotificationManager
+    from gold_monitor.runtime import ApplicationRuntime
+
+    class Delivered:
+        async def send(self, alert):
+            return True
+
+    runtime = ApplicationRuntime(app_settings, background_tasks=False)
+    await runtime.start()
+    try:
+        fetched = FETCH_TOTAL.labels(source="mock", status="success")._value.get()
+        assert (await runtime.collector.collect()).price is not None
+        assert FETCH_TOTAL.labels(source="mock", status="success")._value.get() == (
+            fetched + 1
+        )
+        delivered = NOTIFICATION_TOTAL.labels(
+            channel="Delivered", status="success"
+        )._value.get()
+        manager = NotificationManager(runtime.db, [Delivered()])
+        await manager.send_with_retry(
+            Alert(AlertType.VOLATILITY, 2000.0, "metrics", utcnow())
+        )
+        assert (
+            NOTIFICATION_TOTAL.labels(
+                channel="Delivered", status="success"
+            )._value.get()
+            == delivered + 1
+        )
+        assert ("save_notification_log",) in DB_OPERATION_LATENCY._metrics
+    finally:
+        await runtime.close()

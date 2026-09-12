@@ -12,9 +12,10 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Callable, Optional, TypedDict
+from typing import Callable, TypedDict
 
 from .config import Settings, settings
+from .errors import InvalidInput
 from .models import Database, GoldPrice
 from .time_utils import iso_utc, storage_time, utcnow
 
@@ -130,7 +131,7 @@ class DataLifecycleManager:
         lower = storage_time(start) if start is not None else datetime.min
         upper = storage_time(end) if end is not None else datetime.max
         if lower > upper:
-            raise ValueError("start 不能晚于 end")
+            raise InvalidInput("start 不能晚于 end")
         return await self._db.run(self._db.get_prices_in_range, lower, upper, limit)
 
     @staticmethod
@@ -399,64 +400,3 @@ class DataLifecycleManager:
             logger.exception("数据库恢复失败")
             result["error"] = str(error)
         return result
-
-
-# ============ 定时清理任务 ============
-
-_cleanup_task: Optional[asyncio.Task] = None
-
-
-async def _cleanup_scheduler(manager: DataLifecycleManager, interval_hours: int = 24):
-    """定时清理调度器"""
-    while True:
-        try:
-            # 等待到下一个清理时间
-            await asyncio.sleep(interval_hours * 3600)
-
-            # 执行清理
-            logger.info("开始执行定时数据清理...")
-            result = await manager.cleanup()
-            logger.info("定时清理完成: %s", result)
-
-        except asyncio.CancelledError:
-            logger.info("定时清理任务已取消")
-            break
-        except Exception as e:
-            logger.error("定时清理出错: %s", e)
-            await asyncio.sleep(3600)  # 出错后等待1小时
-
-
-def start_cleanup_scheduler(manager: DataLifecycleManager, interval_hours: int = 24):
-    """旧调用兼容；应用 runtime 自己拥有清理任务，不调用此全局入口。"""
-    global _cleanup_task
-    if _cleanup_task is None or _cleanup_task.done():
-        _cleanup_task = asyncio.create_task(_cleanup_scheduler(manager, interval_hours))
-        logger.info("定时清理任务已启动（间隔: %d 小时）", interval_hours)
-
-
-def stop_cleanup_scheduler():
-    """停止定时清理任务"""
-    global _cleanup_task
-    if _cleanup_task and not _cleanup_task.done():
-        _cleanup_task.cancel()
-
-
-# ============ 全局实例 ============
-
-_lifecycle_manager: Optional[DataLifecycleManager] = None
-
-
-def get_lifecycle_manager(
-    database: Database | None = None,
-) -> Optional[DataLifecycleManager]:
-    """旧调用兼容；新应用从 runtime 获取自己的管理器。"""
-    global _lifecycle_manager
-    if _lifecycle_manager is None and database:
-        _lifecycle_manager = DataLifecycleManager(database)
-    return _lifecycle_manager
-
-
-def set_lifecycle_manager(manager: DataLifecycleManager):
-    """设置全局生命周期管理器"""
-    global _lifecycle_manager
-    _lifecycle_manager = manager

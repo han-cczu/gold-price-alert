@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 
 from ..alerts.types import Alert, AlertType
 from ..config import Settings
+from ..errors import ConfigurationError, InvalidInput
 from ..models import Database
 from ..notifications.channels import (
     ConsoleNotification,
@@ -60,7 +61,7 @@ class NotificationService:
             ),
         }
         if channel not in defaults:
-            raise ValueError("不支持的通知渠道")
+            raise InvalidInput("不支持的通知渠道")
         return defaults[channel]
 
     def _decode(self, values):
@@ -69,10 +70,10 @@ class NotificationService:
             value = values[key]
             if isinstance(value, str) and value.startswith("enc:"):
                 if self._secret is None:
-                    raise ValueError("通知配置需要原有主密钥解密")
+                    raise ConfigurationError("通知配置需要原有主密钥解密")
                 values[key] = self._secret.decrypt(value[4:])
                 if not values[key]:
-                    raise ValueError("通知配置解密失败")
+                    raise ConfigurationError("通知配置解密失败")
         return values
 
     def _encode(self, values):
@@ -81,7 +82,7 @@ class NotificationService:
             if values[key] and self._secret:
                 encrypted = self._secret.encrypt(values[key])
                 if not encrypted:
-                    raise ValueError("通知配置加密失败，原有配置未改变")
+                    raise ConfigurationError("通知配置加密失败，原有配置未改变")
                 values[key] = "enc:" + encrypted
         return values
 
@@ -102,24 +103,24 @@ class NotificationService:
             "telegram": ("bot_token", "chat_id"),
         }[channel]
         if any(not values.get(key) for key in required):
-            raise ValueError(f"{channel} 通知配置不完整")
+            raise InvalidInput(f"{channel} 通知配置不完整")
         if channel == "email":
             if (
                 not isinstance(values.get("smtp_port"), int)
                 or not 1 <= values["smtp_port"] <= 65535
             ):
-                raise ValueError("SMTP 端口必须在 1–65535 之间")
+                raise InvalidInput("SMTP 端口必须在 1–65535 之间")
             if not isinstance(values["to_addrs"], list) or not all(
                 isinstance(v, str) and "@" in v for v in values["to_addrs"]
             ):
-                raise ValueError("收件人必须是邮箱列表")
+                raise InvalidInput("收件人必须是邮箱列表")
             return EmailNotification(**values)
         if channel == "webhook":
             url = urlparse(values["webhook_url"])
             if url.scheme not in ("http", "https") or not url.netloc:
-                raise ValueError("Webhook 地址必须是 HTTP(S) URL")
+                raise InvalidInput("Webhook 地址必须是 HTTP(S) URL")
             if values.get("webhook_type") not in ("generic", "dingtalk", "wechat"):
-                raise ValueError("不支持的 Webhook 类型")
+                raise InvalidInput("不支持的 Webhook 类型")
             return WebhookNotification(**values)
         return TelegramNotification(**values)
 
@@ -160,7 +161,7 @@ class NotificationService:
             overrides = self._decode(record.get_config()) if record else {}
             patch = dict(config or {})
             if set(patch) - set(current):
-                raise ValueError("包含不支持的通知配置字段")
+                raise InvalidInput("包含不支持的通知配置字段")
             for key, value in patch.items():
                 if key in SECRET_FIELDS and (not value or value == "****"):
                     continue
@@ -168,14 +169,14 @@ class NotificationService:
             for key, value in overrides.items():
                 if key == "smtp_port":
                     if type(value) is not int or not 1 <= value <= 65535:
-                        raise ValueError("SMTP 端口必须在 1–65535 之间")
+                        raise InvalidInput("SMTP 端口必须在 1–65535 之间")
                 elif key == "to_addrs":
                     if not isinstance(value, list) or not all(
                         isinstance(v, str) and "@" in v for v in value
                     ):
-                        raise ValueError("收件人必须是邮箱列表")
+                        raise InvalidInput("收件人必须是邮箱列表")
                 elif not isinstance(value, str):
-                    raise ValueError(f"{key} 必须是字符串")
+                    raise InvalidInput(f"{key} 必须是字符串")
             current.update(overrides)
             effective_enabled = current_enabled if enabled is None else enabled
             # Validate before persistence and before changing the running monitor.

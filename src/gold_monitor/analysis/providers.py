@@ -3,6 +3,7 @@
 import inspect
 from contextlib import asynccontextmanager
 import logging
+import re
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Any
@@ -230,11 +231,12 @@ class OpenAIProvider(LLMProvider):
         self.base_url = self._normalize_base_url(
             app_settings.openai_base_url if base_url is None else base_url
         )
-        # model 默认值修正：deepseek 端点未显式给 model 时用 deepseek-chat 兜底
+        # deepseek 端点未显式给 model 时用当前在售的 deepseek-v4-flash 兜底；
+        # 旧别名 deepseek-chat / deepseek-reasoner 已于 2026-07-24 下线。
         if model:
             self.model = model
         elif self.base_url and "deepseek" in self.base_url:
-            self.model = "deepseek-chat"
+            self.model = "deepseek-v4-flash"
         else:
             self.model = "gpt-4o-mini"
         # 读实例值而非每次读全局，保证测试隔离
@@ -246,14 +248,20 @@ class OpenAIProvider(LLMProvider):
         if not self.api_key:
             raise ValueError("需要配置 OpenAI API Key")
 
-    @staticmethod
-    def _normalize_base_url(url: str | None) -> str | None:
-        """标准化 base_url，自动添加 /v1"""
+    _VERSIONED_PATH = re.compile(r"/v\d+\w*(?:/|$)")
+
+    @classmethod
+    def _normalize_base_url(cls, url: str | None) -> str | None:
+        """Append ``/v1`` only when the address carries no API version yet.
+
+        Bare hosts and relay prefixes such as ``https://relay.example/openai``
+        gain ``/v1``; addresses that already name a version, including
+        ``/api/paas/v4`` or ``/v1beta/openai``, are left untouched.
+        """
         if not url:
             return None
         url = url.rstrip("/")
-        # 如果 URL 不包含 /v1，自动添加
-        if not url.endswith("/v1") and "/v1" not in url:
+        if not cls._VERSIONED_PATH.search(urlparse(url).path):
             url = f"{url}/v1"
         return url
 

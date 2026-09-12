@@ -70,7 +70,7 @@ docker compose --profile production up -d --build
 | `GOLD_LLM_CONFIG_PATH` | 模型配置文件路径，Compose 默认 `/app/data/llm_config.json` |
 | `GOLD_CORS_ALLOW_ORIGINS` | 允许跨域的来源；空值按当前同源使用 |
 | `GOLD_RATE_LIMIT_PER_MINUTE` | 每分钟请求限制，Compose 默认 60 |
-| `GOLD_TRUSTED_PROXY_IPS` | CLI 启动时交给 Uvicorn 的可信代理 IP/CIDR，默认只信任 `127.0.0.1` |
+| `GOLD_TRUSTED_PROXY_IPS` | CLI 启动时交给 Uvicorn 的可信代理 IP/CIDR；Compose 默认 `127.0.0.1,172.28.0.10`，后者是自带 Nginx 容器的固定地址 |
 
 可在本机分别生成两个随机值填入管理员凭证和主密钥：
 
@@ -101,11 +101,13 @@ Compose 的 `.env` 用于替换文件中明确引用的 `${...}`，不会把所�
 - `GOLD_DATA_SOURCE` 支持 `mock`、`sina`、`goldapi`、`fallback`；GoldAPI 使用 `GOLD_GOLDAPI_KEY`，采集间隔使用 `GOLD_FETCH_INTERVAL`。Mock 为模拟数据，不是实时行情。
 - `fallback` 仅在真实数据源间切换，每次按 GoldAPI（有密钥时）、Sina 的优先级尝试；每源默认最多 10 秒，主源恢复后重新使用主源。全部失败时明确报不可用，不自动改用 Mock。
 - 同价去重默认每 300 秒保存一个真实采样，通过 `GOLD_PRICE_HEARTBEAT_SECONDS` 调整；不会生成虚构的历史点。
-- 首次没有模型配置文件时，Settings 根据 `GOLD_LLM_PROVIDER`、`GOLD_ANTHROPIC_API_KEY`、`GOLD_OPENAI_API_KEY` 等初始化默认配置；无有效密钥时使用 Mock。
+- 首次没有模型配置文件时，Settings 根据 `GOLD_LLM_PROVIDER`、`GOLD_ANTHROPIC_API_KEY`、`GOLD_OPENAI_API_KEY` 等初始化默认配置；无有效密钥时使用 Mock。DeepSeek 端点未选择模型时默认 `deepseek-v4-flash`。
+- 启动时先从分析历史恢复 24 小时内同一供应商与模型的智能分析结果；没有可复用结果才调用模型，避免每次重启都产生付费调用。
 - 已保存模型文件的优先级高于 Settings 默认值。修改环境变量不会自动改写已保存的平台选择；可在页面切换/重置模型配置。代码中显式传入 provider 时，显式选择优先。
 - `GOLD_OPENAI_BASE_URL` 配置兼容端点；`GOLD_TAVILY_API_KEY` 用于已实现的搜索路径。模型是否真正搜索以响应中的标记和来源为准。
 - 邮件使用 `GOLD_SMTP_*` 与 `GOLD_ALERT_EMAIL_TO`；Webhook 使用 `GOLD_WEBHOOK_URL/GOLD_WEBHOOK_TYPE`；Telegram 使用 `GOLD_TELEGRAM_BOT_TOKEN/GOLD_TELEGRAM_CHAT_ID`。上述项已在当前 Compose 中透传。
 - 通知以 Settings 为默认值，再应用数据库保存的启用状态和字段覆盖。页面保存、测试发送和实际告警使用同一解析路径；启用某渠道后再用测试功能检查该部署环境下的真实连通性。
+- 邮件在端口 465 使用隐式 TLS，其余端口要求 STARTTLS。钉钉、企业微信 Webhook 只有响应体 `errcode` 为 0 才记为发送成功，HTTP 200 但机器人拒绝的情况会记入失败日志。
 - 启用鉴权后，新建本地/智能分析需要管理员凭证；已有智能分析缓存可公开读取。成功结果保存到分析历史，共享的智能分析任务只保存一份记录。
 
 详细优先级、币种和时间约定见 [README](../README.md) 与 [验证记录](refactor-validation.md)。
@@ -132,7 +134,7 @@ docker compose --profile production exec nginx nginx -s reload
 
 当前 Compose 仍将应用端口直接映射到宿主机。需要只通过代理访问时，应按部署环境调整端口绑定或访问规则。
 
-限流不直接相信客户端的 `X-Forwarded-For`。经代理访问时，将 `GOLD_TRUSTED_PROXY_IPS` 设置为实际代理的地址或受控 CIDR，由 Uvicorn 验证代理并解析客户端地址；不要对仍允许公网直连的应用设置 `*`。默认只信任回环地址，因此未配置的 Docker Nginx 会共用一个限流身份。使用独立 `uvicorn gold_monitor.web:app` 命令时，改用 Uvicorn 的 `--forwarded-allow-ips` 参数或进程环境变量 `FORWARDED_ALLOW_IPS`。
+限流不直接相信客户端的 `X-Forwarded-For`。经代理访问时，将 `GOLD_TRUSTED_PROXY_IPS` 设置为实际代理的地址或受控 CIDR，由 Uvicorn 验证代理并解析客户端地址；不要对仍允许公网直连的应用设置 `*`。Compose 给 Nginx 容器分配固定地址 `172.28.0.10`（子网 `172.28.0.0/24`），并默认把它与回环地址一起列入可信代理，经自带 Nginx 访问的每个客户端各有独立的限流身份。若该子网与宿主机现有网络冲突，请同时修改 `docker-compose.yml` 中的子网、Nginx 地址和 `.env` 里的 `GOLD_TRUSTED_PROXY_IPS`。使用独立 `uvicorn gold_monitor.web:app` 命令时，改用 Uvicorn 的 `--forwarded-allow-ips` 参数或进程环境变量 `FORWARDED_ALLOW_IPS`。
 
 ## 4. 监控、备份与更新
 
@@ -145,6 +147,8 @@ docker compose logs --tail=100 gold-monitor
 ```
 
 `/health` 返回数据库连接状态、`collector_running`、采集统计、最后价格和时间。仅数据库连通、采集任务运行、最近采样成功且未超过 `max(30秒, 3 × 当前采集间隔)` 时返回 HTTP 200，其余返回 503。容器通过 `python -m gold_monitor.healthcheck` 同时检查 HTTP 和健康 JSON。数据源故障会使容器标记为 unhealthy；Docker 的 `restart: unless-stopped` 本身不会因 unhealthy 自动重启容器。
+
+`/api/price/current` 返回采集器最近的成功报价，不再每次请求都访问上游行情源；报价过期时最多每个采集间隔重新抓取一次。所有 `/api/` 路径按客户端限流（默认每分钟 60 次，`/health` 与静态资源除外），多个访客共用一个出口地址时可调高 `GOLD_RATE_LIMIT_PER_MINUTE`。
 
 ### SQLite 一致性备份
 
@@ -181,6 +185,8 @@ docker cp gold-monitor:/app/data/backups/manual.db ./backup/manual.db
 docker compose up -d --build gold-monitor
 ```
 
+新版本启动时会为已有 SQLite 数据库补建缺失的索引（时间戳、币种加时间戳、告警与通知日志时间）；在大表上首次启动可能多花几秒，之后正常。
+
 将 `.env` 中 `PORT` 设置为需要的宿主机端口，例如 `PORT=8080`，再重新创建服务即可；应用在容器内仍监听 8000。
 
 数据库和默认模型配置使用 named volume。普通容器重建会继续使用它；删除 volume 会同时删除其中的数据。当前项目未配置日志文件挂载，日志主要通过容器日志查看；保留时长和轮转由部署环境设置。
@@ -190,4 +196,4 @@ docker compose up -d --build gold-monitor
 - 基线的隔离 Mock 容器检查已通过；本次修复及真实服务验证范围见 [修复记录](reliability-fixes.md)。
 - 单进程限制适用于本地与容器运行；当前没有独立后台 worker、分布式调度或通知持久队列。
 - 通知结果会入库，但进程异常退出后不保证补发或恰好发送一次。
-- 当前仅清理过期原始报价，小时/日聚合未实现，对应两个配置项仅兼容保留；自动备份使用独立调度，不依赖清理任务。
+- 当前仅清理过期原始报价（启动时执行一次，此后每 24 小时），小时/日聚合未实现，对应两个配置项仅兼容保留；自动备份使用独立调度，不依赖清理任务。

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gold-price-alert"
-version = "0.2.0"
+version = "0.3.0"
 description = "金价实时监控与智能分析系统"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -44,7 +44,12 @@ gold-monitor = "gold_monitor.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-gold_monitor = ["static/*.html", "static/css/*.css", "static/js/*.js"]
+gold_monitor = [
+    "static/*.html",
+    "static/css/*.css",
+    "static/js/*.js",
+    "static/vendor/*.js",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

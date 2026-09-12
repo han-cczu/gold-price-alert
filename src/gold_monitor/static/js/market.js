@@ -2,7 +2,7 @@ import { convertUnitPrice, formatTimestamp } from './state.js';
 import { escapeHtml, showError } from './render.js';
 
 const BANK_COLORS = Object.freeze({ '工商银行': '#C80000', '中国银行': '#C2000B', '建设银行': '#0066B3', '农业银行': '#009966', '交通银行': '#003087', '招商银行': '#C41230', '兴业银行': '#0055A5', '民生银行': '#00A0E9', '浦发银行': '#003399', '光大银行': '#7B2D8E', '平安银行': '#FA6400', '中信银行': '#E60012' });
-const ALERT_ICONS = Object.freeze({ threshold_upper: '🔴', threshold_lower: '🟡', volatility: '⚡' });
+const ALERT_ICONS = Object.freeze({ threshold_upper: '🔴', threshold_lower: '🟡', volatility: '⚡', breakout_up: '📈', breakout_down: '📉', pullback: '↩️' });
 
 export function createMarket({ request, onExchangeRate }) {
     let exchangeRate = 7.2;

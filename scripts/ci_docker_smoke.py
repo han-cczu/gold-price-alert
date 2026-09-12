@@ -18,6 +18,8 @@ JS_MODULES = (
     "state",
 )
 
+VENDOR_ASSETS = ("echarts.min.js", "marked.umd.js", "purify.min.js")
+
 
 def checked_get(client, path):
     response = client.get(path)
@@ -80,6 +82,9 @@ def main():
         print("PASS /: dashboard HTML and asset references")
 
         assets = [(f"/static/js/{name}.js", "javascript") for name in JS_MODULES]
+        assets.extend(
+            (f"/static/vendor/{name}", "javascript") for name in VENDOR_ASSETS
+        )
         assets.append(("/static/css/dashboard.css", "text/css"))
         for path, media_type in assets:
             response = checked_get(client, path)
@@ -88,7 +93,10 @@ def main():
             ):
                 raise RuntimeError(f"{path}: empty asset or incorrect content type")
             print(f"PASS {path}")
-    print("Docker smoke test passed: health, price, HTML, 9 JS modules and 1 CSS file")
+    print(
+        "Docker smoke test passed: health, price, HTML, 9 JS modules, "
+        "3 vendored libraries and 1 CSS file"
+    )
 
 
 if __name__ == "__main__":

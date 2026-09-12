@@ -1,6 +1,7 @@
 """FastAPI application factory and backwards-compatible ASGI entry point."""
 
 from contextlib import asynccontextmanager
+import logging
 from pathlib import Path
 import warnings
 
@@ -11,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__, routers
 from .config import Settings
+from .errors import ConfigurationError, InvalidInput
 from .llm_config import LLMConfigPersistenceError, LLMConfigLoadError
 from .metrics import MetricsMiddleware, set_system_info
 from .runtime import ApplicationRuntime
@@ -18,6 +20,7 @@ from .security import is_admin_path, is_rate_limited_path
 from .services.prices import PriceUnavailableError
 
 STATIC_DIR = Path(__file__).parent / "static"
+logger = logging.getLogger(__name__)
 
 
 def create_app(
@@ -99,9 +102,22 @@ def create_app(
     async def source_failure(request, exc):
         return JSONResponse({"detail": str(exc)}, status_code=503)
 
-    @application.exception_handler(ValueError)
-    async def invalid_configuration(request, exc):
+    @application.exception_handler(InvalidInput)
+    async def invalid_input(request, exc):
         return JSONResponse({"detail": str(exc)}, status_code=400)
+
+    @application.exception_handler(ConfigurationError)
+    async def unusable_configuration(request, exc):
+        return JSONResponse({"detail": str(exc)}, status_code=503)
+
+    @application.exception_handler(ValueError)
+    async def unexpected_value_error(request, exc):
+        # Only InvalidInput carries text meant for callers. Any other ValueError
+        # is a defect; report it as such instead of echoing internals as a 400.
+        logger.error(
+            "未处理的 ValueError: %s %s", request.method, request.url.path, exc_info=exc
+        )
+        return JSONResponse({"detail": "服务器内部错误"}, status_code=500)
 
     @application.get("/", response_class=HTMLResponse)
     async def root():
@@ -138,10 +154,4 @@ def __getattr__(name):
     raise AttributeError(name)
 
 
-def run_server(host: str = "0.0.0.0", port: int = 8000):
-    import uvicorn
-
-    uvicorn.run("gold_monitor.web:app", host=host, port=port)
-
-
-__all__ = ["app", "create_app", "run_server"]
+__all__ = ["app", "create_app"]
