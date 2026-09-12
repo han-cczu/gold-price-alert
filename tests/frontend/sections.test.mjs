@@ -155,3 +155,31 @@ test('chart refreshes full-window statistics after the rolling boundary expires'
     assert.equal(element('stat-count').textContent, 1);
     assert.equal(element('price-change').textContent, '+0.00%');
 });
+
+test('anonymous pages under authentication label the AI card from the public summary', async t => {
+    const element = mockDocument(t);
+    const requested = [];
+    const analysis = createAnalysis({ onOpenSettings: () => {}, canAdministrate: () => false, request: async path => {
+        requested.push(path);
+        if (path === '/api/config') return { llm_provider: 'deepseek', llm_provider_name: 'DeepSeek', llm_enabled: true, llm_model: 'deepseek-v4-flash' };
+        throw new Error('需要有效的管理员凭证，请在设置中填写');
+    } });
+    await analysis.fetchAIStatus();
+    await analysis.loadAnalysisModels();
+    assert.deepEqual(requested, ['/api/config', '/api/config']);
+    assert.equal(element('ai-status-text').textContent, 'AI 已启用: DeepSeek - deepseek-v4-flash');
+    assert.deepEqual(element('analysis-model-select').options.map(option => option.value), ['', 'deepseek-v4-flash']);
+    assert.equal(element('analysis-model-select').value, 'deepseek-v4-flash');
+});
+
+test('administrators keep reading provider metadata for the model selector', async t => {
+    const element = mockDocument(t);
+    const requested = [];
+    const analysis = createAnalysis({ onOpenSettings: () => {}, canAdministrate: () => true, request: async path => {
+        requested.push(path);
+        return providerConfig;
+    } });
+    await analysis.loadAnalysisModels();
+    assert.deepEqual(requested, ['/api/llm/providers']);
+    assert.deepEqual(element('analysis-model-select').options.map(option => option.value), ['', 'old-model']);
+});

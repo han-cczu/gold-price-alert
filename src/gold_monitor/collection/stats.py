@@ -9,6 +9,15 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def freshness_limit_seconds(interval: int) -> int:
+    """Age after which the collector's last successful quote counts as stale.
+
+    Shared by the readiness probe and the price API so both agree on what
+    "current" means for a given collection interval.
+    """
+    return max(30, interval * 3)
+
+
 @dataclass
 class SourceStats:
     """单个数据源统计"""

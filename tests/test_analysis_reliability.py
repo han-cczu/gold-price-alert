@@ -6,7 +6,7 @@ from datetime import timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from gold_monitor.analysis.providers import MockLLMProvider
+from gold_monitor.analysis.providers import LLMProvider, MockLLMProvider
 from gold_monitor.llm_config import LLMConfigManager
 from gold_monitor.models import Database
 from gold_monitor.services.analysis import AnalysisService
@@ -220,3 +220,65 @@ async def test_local_history_records_usd_window_and_actual_model(
     assert "样本数：2" in record.input_summary
     assert record.get_result()["summary"] == report.summary
     await service.close()
+
+
+class NamedProvider(LLMProvider):
+    def __init__(self, model):
+        self.model = model
+        self.calls = 0
+
+    async def analyze(self, context):
+        raise NotImplementedError
+
+    async def smart_analyze(self):
+        self.calls += 1
+        report = await MockLLMProvider().smart_analyze()
+        report.market_overview = f"report from {self.model}"
+        return report
+
+
+@pytest.mark.asyncio
+async def test_restore_cache_only_reuses_reports_from_the_current_model(
+    app_settings, history_database
+):
+    manager = LLMConfigManager(settings=app_settings)
+    manager.update_provider("openai", api_key="fixture-key", models=["m1", "m2"])
+    manager.set_active("openai", "m1")
+    first = NamedProvider("m1")
+    service = AnalysisService(
+        manager, database=history_database, provider_factory=lambda *_: first
+    )
+    await service.run_smart()
+    await service.close()
+
+    restored = NamedProvider("m1")
+    reopened = AnalysisService(
+        manager, database=history_database, provider_factory=lambda *_: restored
+    )
+    assert await reopened.restore_cache(max_age=timedelta(hours=24)) is True
+    cache = reopened.get_cache()
+    assert cache["market_overview"] == "report from m1"
+    assert cache["generated_at"].tzinfo is None
+    assert (await reopened.run_smart())["market_overview"] == "report from m1"
+    assert restored.calls == 0, "a restored report replaces the startup call"
+    assert await reopened.restore_cache() is True, "restoring again is harmless"
+    await reopened.close()
+
+    manager.set_active("openai", "m2")
+    other = AnalysisService(
+        manager,
+        database=history_database,
+        provider_factory=lambda *_: NamedProvider("m2"),
+    )
+    assert await other.restore_cache(max_age=timedelta(hours=24)) is False
+    assert other.get_cache() is None
+    await other.close()
+
+    expired = AnalysisService(
+        manager.__class__(settings=app_settings),
+        database=history_database,
+        provider_factory=lambda *_: NamedProvider("m1"),
+    )
+    expired.config_manager.set_active("openai", "m1")
+    assert await expired.restore_cache(max_age=timedelta(seconds=-1)) is False
+    await expired.close()

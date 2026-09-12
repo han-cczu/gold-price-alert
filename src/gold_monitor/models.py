@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Float, DateTime, String, Text, ForeignKey
+from sqlalchemy import Float, DateTime, Index, String, Text, ForeignKey
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -21,13 +21,17 @@ class GoldPrice(Base):
     """金价记录表"""
 
     __tablename__ = "gold_prices"
+    # Every hot query orders or filters by time, usually within one currency.
+    __table_args__ = (
+        Index("ix_gold_prices_currency_timestamp", "currency", "timestamp"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     price: Mapped[float] = mapped_column(Float, nullable=False, comment="金价 (USD/oz)")
     currency: Mapped[str] = mapped_column(String(10), default="USD", comment="货币单位")
     source: Mapped[str] = mapped_column(String(50), comment="数据来源")
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, comment="采集时间"
+        DateTime, default=_utcnow, index=True, comment="采集时间"
     )
 
     def __repr__(self):
@@ -48,7 +52,7 @@ class AlertRecord(Base):
     price: Mapped[float] = mapped_column(Float, nullable=False, comment="触发时价格")
     message: Mapped[str] = mapped_column(Text, comment="告警消息")
     triggered_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, comment="触发时间"
+        DateTime, default=_utcnow, index=True, comment="触发时间"
     )
 
     def __repr__(self):
@@ -121,7 +125,7 @@ class NotificationLog(Base):
     )
     retry_count: Mapped[int] = mapped_column(default=0, comment="重试次数")
     sent_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, comment="发送时间"
+        DateTime, default=_utcnow, index=True, comment="发送时间"
     )
 
     def __repr__(self):
@@ -188,7 +192,7 @@ class AnalysisRecord(Base):
     input_summary: Mapped[str | None] = mapped_column(Text, comment="输入数据摘要")
     result: Mapped[str | None] = mapped_column(Text, comment="分析结果JSON")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, comment="创建时间"
+        DateTime, default=_utcnow, index=True, comment="创建时间"
     )
 
     def __repr__(self):

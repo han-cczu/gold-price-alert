@@ -2,8 +2,10 @@
 
 import asyncio
 import logging
+import time
 
 from ..alerts.types import Alert
+from ..metrics import record_notification
 from ..models import Database
 from .channels import NotificationChannel
 
@@ -25,6 +27,7 @@ class NotificationManager:
     async def _send(self, channel: NotificationChannel, alert: Alert, alert_id):
         name = channel.__class__.__name__
         success, error, attempt = False, None, 0
+        started = time.monotonic()
         for attempt in range(self._max_retries):
             try:
                 success = await asyncio.wait_for(channel.send(alert), timeout=12)
@@ -35,6 +38,7 @@ class NotificationManager:
                 error = type(exc).__name__
             if attempt < self._max_retries - 1:
                 await asyncio.sleep(2**attempt)
+        record_notification(name, success, time.monotonic() - started)
         await self._db.run(
             self._db.save_notification_log,
             channel=name,

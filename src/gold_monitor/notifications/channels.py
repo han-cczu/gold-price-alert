@@ -93,8 +93,16 @@ class EmailNotification(NotificationChannel):
 """
             msg.attach(MIMEText(body, "plain", "utf-8"))
 
-            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=10) as server:
-                server.starttls()
+            # Port 465 is implicit TLS; every other port must upgrade with STARTTLS.
+            implicit_tls = self.smtp_port == 465
+            connection = (
+                smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, timeout=10)
+                if implicit_tls
+                else smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=10)
+            )
+            with connection as server:
+                if not implicit_tls:
+                    server.starttls()
                 server.login(self.username, self.password)
                 server.sendmail(self.username, self.to_addrs, msg.as_string())
 
@@ -142,10 +150,32 @@ class WebhookNotification(NotificationChannel):
                 timeout=aiohttp.ClientTimeout(total=10)
             ) as session:
                 async with session.post(self.webhook_url, json=payload) as resp:
-                    return resp.status == 200
+                    return await self._delivered(resp)
         except Exception as e:
             logger.warning("Webhook 发送失败: %s", type(e).__name__)
             return False
+
+    async def _delivered(self, response) -> bool:
+        """DingTalk and WeChat Work robots report rejection inside a 200 body."""
+        if not 200 <= response.status < 300:
+            logger.warning("Webhook 返回 HTTP %s", response.status)
+            return False
+        if self.webhook_type not in ("dingtalk", "wechat"):
+            return True
+        try:
+            body = await response.json(content_type=None)
+        except Exception:
+            logger.warning("Webhook 响应不是 JSON，无法确认机器人已接受消息")
+            return False
+        code = body.get("errcode") if isinstance(body, dict) else None
+        if code == 0:
+            return True
+        logger.warning(
+            "Webhook 机器人拒绝了消息: errcode=%s errmsg=%s",
+            code,
+            body.get("errmsg") if isinstance(body, dict) else body,
+        )
+        return False
 
 
 class TelegramNotification(NotificationChannel):

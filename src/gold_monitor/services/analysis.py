@@ -1,6 +1,7 @@
 """Application-owned analysis work, configuration-aware cache, and cancellation."""
 
 import asyncio
+import time
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import asdict
@@ -10,14 +11,16 @@ from typing import Any
 from ..analysis.factory import provider_from_config
 from ..analysis.providers import LLMProvider, MockLLMProvider
 from ..config import Settings
+from ..errors import InvalidInput
 from ..llm_config import LLMConfig, LLMConfigManager
+from ..metrics import record_analysis
 from ..models import Database
-from ..time_utils import iso_utc, utcnow
+from ..time_utils import iso_utc, storage_time, utcnow
 
 ProviderFactory = Callable[[LLMConfig, str | None, Settings], LLMProvider]
 
 
-class AnalysisDataError(ValueError):
+class AnalysisDataError(InvalidInput):
     """Local samples are insufficient to construct an analysis context."""
 
 
@@ -112,6 +115,45 @@ class AnalysisService:
         self._cache_key = None
         self._generation += 1
 
+    async def restore_cache(self, max_age: timedelta | None = None) -> bool:
+        """Publish the newest stored report for the current supplier and model.
+
+        A restart would otherwise repeat a paid analysis whose result already
+        sits in the history table. Reports from another supplier or model, or
+        older than ``max_age``, are ignored.
+        """
+        if self._closed or self._database is None:
+            return False
+        config = await asyncio.to_thread(self.config_manager.reload_config)
+        records = await self._database.run(
+            self._database.get_analysis_records, limit=1, analysis_type="smart"
+        )
+        if not records:
+            return False
+        record = records[0]
+        result = record.get_result()
+        generated = result.get("generated_at")
+        if not isinstance(generated, str):
+            return False
+        try:
+            generated_at = storage_time(
+                datetime.fromisoformat(generated.replace("Z", "+00:00"))
+            )
+        except ValueError:
+            return False
+        if max_age is not None and utcnow() - generated_at > max_age:
+            return False
+        provider = self._provider_factory(config, None, self.settings)
+        try:
+            identity = self._model_identity(config, provider)
+        finally:
+            await provider.close()
+        if (record.model_provider, record.model_name) != identity or self._closed:
+            return False
+        result["generated_at"] = generated_at
+        self._cache, self._cache_key = result, self._key(config, None)
+        return True
+
     async def run_smart(
         self, model: str | None = None, force: bool = False
     ) -> dict[str, Any]:
@@ -144,10 +186,15 @@ class AnalysisService:
         self, config: LLMConfig, model: str | None, key: tuple
     ) -> dict[str, Any]:
         provider = self._provider_factory(config, model, self.settings)
+        started = time.perf_counter()
         try:
             report = await provider.smart_analyze()
             result = asdict(report)
-            result["model_used"] = self._model_identity(config, provider, model)[1]
+            provider_id, model_name = self._model_identity(config, provider, model)
+            result["model_used"] = model_name
+            record_analysis(
+                "smart", provider_id or "unknown", time.perf_counter() - started
+            )
         finally:
             await provider.close()
         # Persist inside the shared task, once per supplier call. Failed work or
@@ -226,12 +273,18 @@ class AnalysisService:
             raise AnalysisDataError("当前价格必须大于0")
         config = await asyncio.to_thread(self.config_manager.reload_config)
         provider = self._provider_factory(config, None, self.settings)
+        started = time.perf_counter()
         try:
             report = await GoldAnalyzer(llm_provider=provider).analyze_volatility(
                 current_price=records[-1].price,
                 price_change=records[-1].price - records[0].price,
                 recent_prices=[(item.timestamp, item.price) for item in records],
                 time_window_minutes=window_minutes,
+            )
+            record_analysis(
+                "volatility",
+                self._model_identity(config, provider)[0] or "unknown",
+                time.perf_counter() - started,
             )
         finally:
             await provider.close()

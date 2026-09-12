@@ -7,6 +7,7 @@ from datetime import timedelta
 import httpx
 
 from ..data_sources.bank import BankGoldDataSource
+from ..errors import InvalidInput
 from ..time_utils import utcnow, iso_utc
 
 UNIT_FACTORS = {"oz": 1.0, "g": 31.1035, "kg": 0.0311035}
@@ -69,11 +70,11 @@ class MarketService:
 
     async def convert(self, price, from_unit, to_unit, from_currency, to_currency):
         if not math.isfinite(price) or price < 0:
-            raise ValueError("价格必须是有限非负数")
+            raise InvalidInput("价格必须是有限非负数")
         if from_unit not in UNIT_FACTORS or to_unit not in UNIT_FACTORS:
-            raise ValueError("不支持的单位")
+            raise InvalidInput("不支持的单位")
         if from_currency not in ("USD", "CNY") or to_currency not in ("USD", "CNY"):
-            raise ValueError("不支持的币种")
+            raise InvalidInput("不支持的币种")
         rate_data = await self.exchange_rate()
         rate = rate_data["usd_cny"]
         factor = (

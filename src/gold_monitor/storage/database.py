@@ -5,10 +5,10 @@ no session is passed between the event loop and the worker thread.
 """
 
 import asyncio
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from functools import partial
 from threading import RLock
 from typing import Callable, ParamSpec, TypeVar
 
@@ -17,6 +17,8 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from ..errors import InvalidInput
+from ..metrics import record_db_operation
 from ..models import (
     AlertRecord,
     AlertState,
@@ -67,9 +69,16 @@ class Database:
         """
         if self._closed or self._closing:
             raise RuntimeError("数据库已关闭")
-        future = asyncio.get_running_loop().run_in_executor(
-            self._executor, partial(operation, *args, **kwargs)
-        )
+        name = getattr(operation, "__name__", None) or type(operation).__name__
+
+        def timed() -> T:
+            started = time.perf_counter()
+            try:
+                return operation(*args, **kwargs)
+            finally:
+                record_db_operation(name, time.perf_counter() - started)
+
+        future = asyncio.get_running_loop().run_in_executor(self._executor, timed)
         try:
             return await asyncio.shield(future)
         except asyncio.CancelledError:
@@ -106,13 +115,18 @@ class Database:
             or not isinstance(limit, int)
             or not 1 <= limit <= 100000
         ):
-            raise ValueError("查询条数必须在 1 到 100000 之间")
+            raise InvalidInput("查询条数必须在 1 到 100000 之间")
         return limit
 
     def create_tables(self):
-        """创建所有表"""
+        """Create missing tables, then indexes an existing database still lacks."""
         with self._lock:
             Base.metadata.create_all(self.engine)
+            # create_all skips existing tables entirely, so indexes added after a
+            # database was first created would otherwise never be built.
+            for table in Base.metadata.sorted_tables:
+                for index in table.indexes:
+                    index.create(self.engine, checkfirst=True)
 
     @contextmanager
     def get_session(self):
@@ -184,7 +198,7 @@ class Database:
         """获取时间范围内的金价"""
         start, end = _naive_utc(start), _naive_utc(end)
         if start > end or offset < 0:
-            raise ValueError("无效的查询范围")
+            raise InvalidInput("无效的查询范围")
         order = (
             (GoldPrice.timestamp.desc(), GoldPrice.id.desc())
             if newest_first
@@ -219,10 +233,10 @@ class Database:
         """
         self._query_limit(max_points)
         if max_points < 2:
-            raise ValueError("图表至少需要保留 2 个点")
+            raise InvalidInput("图表至少需要保留 2 个点")
         start, end = _naive_utc(start), _naive_utc(end)
         if start > end:
-            raise ValueError("无效的查询范围")
+            raise InvalidInput("无效的查询范围")
         filters = (
             GoldPrice.timestamp >= start,
             GoldPrice.timestamp <= end,
@@ -298,46 +312,66 @@ class Database:
                             .label("position"),
                         )
                         .where(*filters)
-                        .subquery()
+                        .cte("numbered")
                     )
-                    bucket = cast((numbered.c.position - 2) / bucket_size, Integer)
-                    ranked = (
+                    # Interior observations fall into equally sized buckets. One
+                    # GROUP BY pass finds each bucket's extreme prices; only rows
+                    # at those prices are ranked, so the database never sorts
+                    # every observation of every bucket by price.
+                    interior = (
                         select(
                             numbered.c.id,
                             numbered.c.timestamp,
                             numbered.c.price,
-                            func.row_number()
-                            .over(
-                                partition_by=bucket,
-                                order_by=(
-                                    numbered.c.price,
-                                    numbered.c.timestamp,
-                                    numbered.c.id,
-                                ),
-                            )
-                            .label("low_rank"),
-                            func.row_number()
-                            .over(
-                                partition_by=bucket,
-                                order_by=(
-                                    numbered.c.price.desc(),
-                                    numbered.c.timestamp,
-                                    numbered.c.id,
-                                ),
-                            )
-                            .label("high_rank"),
+                            cast(
+                                (numbered.c.position - 2) / bucket_size, Integer
+                            ).label("bucket"),
                         )
                         .where(numbered.c.position > 1, numbered.c.position < count)
-                        .subquery()
+                        .cte("interior")
+                    )
+                    extremes = (
+                        select(
+                            interior.c.bucket,
+                            func.min(interior.c.price).label("low"),
+                            func.max(interior.c.price).label("high"),
+                        )
+                        .group_by(interior.c.bucket)
+                        .cte("extremes")
+                    )
+                    candidates = (
+                        select(
+                            interior.c.id,
+                            interior.c.timestamp,
+                            interior.c.price,
+                            func.row_number()
+                            .over(
+                                partition_by=(interior.c.bucket, interior.c.price),
+                                order_by=(interior.c.timestamp, interior.c.id),
+                            )
+                            .label("rank"),
+                        )
+                        .select_from(
+                            interior.join(
+                                extremes, extremes.c.bucket == interior.c.bucket
+                            )
+                        )
+                        .where(
+                            or_(
+                                interior.c.price == extremes.c.low,
+                                interior.c.price == extremes.c.high,
+                            )
+                        )
+                        .cte("candidates")
                     )
                     samples = session.execute(
                         select(
-                            ranked.c.id,
-                            ranked.c.timestamp,
-                            ranked.c.price,
+                            candidates.c.id,
+                            candidates.c.timestamp,
+                            candidates.c.price,
                         )
-                        .where(or_(ranked.c.low_rank == 1, ranked.c.high_rank == 1))
-                        .order_by(ranked.c.timestamp, ranked.c.id)
+                        .where(candidates.c.rank == 1)
+                        .order_by(candidates.c.timestamp, candidates.c.id)
                         .limit(max_points - 2)
                     )
                     points.extend((row.id, row.timestamp, row.price) for row in samples)

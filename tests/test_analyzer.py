@@ -200,11 +200,48 @@ def test_openai_supports_web_search_with_tavily():
 
 
 def test_openai_deepseek_default_model():
-    """deepseek 端点未显式给 model 时默认 deepseek-chat"""
+    """deepseek 端点未显式给 model 时默认当前在售的 deepseek-v4-flash。
+
+    deepseek-chat / deepseek-reasoner 别名已于 2026-07-24 下线，不能再作兜底。
+    """
+    from gold_monitor.analysis.factory import resolve_model
+    from gold_monitor.llm_config import ModelProvider
+
     provider = OpenAIProvider(api_key="k", base_url="https://api.deepseek.com")
-    assert provider.model == "deepseek-chat"
+    assert provider.model == "deepseek-v4-flash"
     official = OpenAIProvider(api_key="k", base_url="https://api.openai.com/v1")
     assert official.model == "gpt-4o-mini"
+    saved = ModelProvider(
+        id="deepseek", name="DeepSeek", base_url="https://api.deepseek.com"
+    )
+    assert resolve_model(saved) == "deepseek-v4-flash"
+    assert resolve_model(saved, "deepseek-v4-pro") == "deepseek-v4-pro"
+
+
+@pytest.mark.parametrize(
+    "given, expected",
+    [
+        ("https://api.deepseek.com", "https://api.deepseek.com/v1"),
+        ("https://api.deepseek.com/", "https://api.deepseek.com/v1"),
+        ("https://relay.example/openai", "https://relay.example/openai/v1"),
+        ("https://api.openai.com/v1", "https://api.openai.com/v1"),
+        (
+            "https://open.bigmodel.cn/api/paas/v4",
+            "https://open.bigmodel.cn/api/paas/v4",
+        ),
+        (
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        ),
+        (
+            "https://generativelanguage.googleapis.com/v1beta/openai/",
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+        ),
+    ],
+)
+def test_base_url_normalization_keeps_existing_api_versions(given, expected):
+    """只有不带版本号的地址才补 /v1；/v4、/v1beta 等已有版本原样保留。"""
+    assert OpenAIProvider._normalize_base_url(given) == expected
 
 
 class _FakeFunction:

@@ -1,12 +1,11 @@
 # 金价实时监控系统 - Dockerfile (纯 Web 模式)
 
 # ============ 构建阶段 ============
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends gcc && rm -rf /var/lib/apt/lists/*
-
+# All runtime dependencies ship manylinux wheels; no compiler is needed.
 COPY pyproject.toml .
 
 RUN python -m venv /opt/venv
@@ -21,7 +20,7 @@ RUN pip install --no-cache-dir .
 
 
 # ============ 运行阶段 ============
-FROM python:3.11-slim as runtime
+FROM python:3.11-slim AS runtime
 
 WORKDIR /app
 

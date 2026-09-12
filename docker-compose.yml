@@ -1,7 +1,5 @@
 # 金价实时监控系统 - Docker Compose (纯 Web 模式)
-# 使用: docker-compose up -d
-
-version: '3.8'
+# 使用: docker compose up -d
 
 services:
   # ============ 主服务（Web + 数据采集 + 告警） ============
@@ -60,7 +58,8 @@ services:
       - GOLD_ENCRYPT_API_KEYS=${GOLD_ENCRYPT_API_KEYS:-true}
       - GOLD_CORS_ALLOW_ORIGINS=${GOLD_CORS_ALLOW_ORIGINS:-}
       - GOLD_RATE_LIMIT_PER_MINUTE=${GOLD_RATE_LIMIT_PER_MINUTE:-60}
-      - GOLD_TRUSTED_PROXY_IPS=${GOLD_TRUSTED_PROXY_IPS:-127.0.0.1}
+      # 默认信任回环地址和下方固定地址的 Nginx 容器；改子网时一并修改。
+      - GOLD_TRUSTED_PROXY_IPS=${GOLD_TRUSTED_PROXY_IPS:-127.0.0.1,172.28.0.10}
     healthcheck:
       test: ["CMD", "python", "-m", "gold_monitor.healthcheck"]
       interval: 30s
@@ -85,7 +84,9 @@ services:
       gold-monitor:
         condition: service_healthy
     networks:
-      - gold_network
+      gold_network:
+        # 固定地址使应用只信任本代理转发的 X-Forwarded-For。
+        ipv4_address: 172.28.0.10
     profiles:
       - production
 
@@ -94,3 +95,6 @@ volumes:
 
 networks:
   gold_network:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24

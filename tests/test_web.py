@@ -120,6 +120,48 @@ def test_get_config(client):
     data = response.json()
     assert "data_source" in data
     assert "fetch_interval" in data
+    # Public summary lets anonymous pages label the AI card without admin calls.
+    assert data["llm_provider_name"] == "Mock（模拟测试）"
+    assert data["llm_enabled"] is False
+
+
+def test_current_price_reads_do_not_multiply_upstream_fetches(client):
+    """匿名读取当前价复用采集器报价，不能每次都触发上游抓取和入库。"""
+    collector = client.app.state.runtime.collector
+    fetches, saved = collector.stats.total_fetches, collector.stats.saved_count
+    assert {client.get("/api/price/current").status_code for _ in range(10)} == {200}
+    assert collector.stats.total_fetches - fetches == 1
+    assert collector.stats.saved_count - saved <= 1
+
+
+def test_internal_value_errors_are_not_reported_as_client_errors(application):
+    """只有 InvalidInput 的文本会返回给调用方；其他 ValueError 是缺陷，返回通用 500。"""
+    from fastapi.testclient import TestClient
+
+    from gold_monitor.errors import ConfigurationError, InvalidInput
+
+    @application.get("/api/_probe/internal")
+    async def internal():
+        raise ValueError("secret internal detail")
+
+    @application.get("/api/_probe/invalid")
+    async def invalid():
+        raise InvalidInput("参数无效")
+
+    @application.get("/api/_probe/configuration")
+    async def configuration():
+        raise ConfigurationError("需要主密钥")
+
+    with TestClient(application) as client:
+        internal_response = client.get("/api/_probe/internal")
+        assert internal_response.status_code == 500
+        assert "secret" not in internal_response.text
+        assert internal_response.json()["detail"] == "服务器内部错误"
+        assert client.get("/api/_probe/invalid").json() == {"detail": "参数无效"}
+        assert client.get("/api/_probe/invalid").status_code == 400
+        configuration_response = client.get("/api/_probe/configuration")
+        assert configuration_response.status_code == 503
+        assert configuration_response.json() == {"detail": "需要主密钥"}
 
 
 def test_get_exchange_rate(client):

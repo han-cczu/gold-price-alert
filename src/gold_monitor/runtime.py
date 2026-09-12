@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from .alert import AlertMonitor
 from .collector import AdvancedCollector, FetchStrategy
@@ -119,15 +119,22 @@ class ApplicationRuntime:
                 if self.config.backup_enabled:
                     self.spawn(self._backup_loop())
                 self.spawn(self._daily_analysis())
-                self.spawn(self.analysis.run_smart())
+                self.spawn(self._initial_smart_analysis())
         except BaseException:
             await self.close()
             raise
 
     async def _cleanup_loop(self):
+        # Retention runs at startup and then daily; it must not depend on the
+        # process surviving a full day before the first pass.
         while True:
+            try:
+                result = await self.lifecycle.cleanup()
+                if result.get("error"):
+                    logger.error("数据清理失败: %s", result["error"])
+            except Exception:
+                logger.exception("数据清理任务失败")
             await asyncio.sleep(24 * 3600)
-            await self.lifecycle.cleanup()
 
     async def _backup_loop(self):
         while True:
@@ -141,12 +148,25 @@ class ApplicationRuntime:
                 logger.exception("自动备份任务失败，保留已有备份")
             await asyncio.sleep(self.config.backup_interval_hours * 3600)
 
+    async def _initial_smart_analysis(self):
+        """Reuse a recent stored report instead of paying for a new one at startup."""
+        try:
+            if isinstance(self.analysis, AnalysisService) and (
+                await self.analysis.restore_cache(max_age=timedelta(hours=24))
+            ):
+                logger.info("已恢复最近的智能分析结果，跳过启动时的模型调用")
+                return
+            await self.analysis.run_smart()
+        except Exception:
+            logger.exception("启动智能分析失败")
+
     async def _daily_analysis(self):
         while True:
-            now = datetime.now()
-            tomorrow = now.replace(
+            # Scheduling follows the UTC convention used by all stored data.
+            now = utcnow()
+            tomorrow = (now + timedelta(days=1)).replace(
                 hour=0, minute=0, second=0, microsecond=0
-            ) + timedelta(days=1)
+            )
             await asyncio.sleep((tomorrow - now).total_seconds())
             try:
                 await self.analysis.run_smart(force=True)

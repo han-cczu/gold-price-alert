@@ -8,7 +8,6 @@ import secrets
 import time
 from collections import OrderedDict, deque
 from collections.abc import Callable
-from typing import Optional
 
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import HTTPException, Request, status
@@ -253,12 +252,9 @@ ADMIN_PATHS = [
     "/api/notifications/",  # config / logs / test 全部纳入
 ]
 
-# 需要限流的路径前缀
-RATE_LIMITED_PATHS = [
-    "/api/smart-analysis",
-    "/api/analysis",
-    "/api/llm/",
-]
+# 需要限流的路径前缀。所有 API 共用每客户端配额；/health 和静态资源不限流，
+# 以免探针和页面加载被拒绝。图表聚合、当前价等公开接口同样消耗服务器资源。
+RATE_LIMITED_PATHS = ["/api/"]
 
 
 def is_admin_path(path: str) -> bool:
@@ -269,34 +265,3 @@ def is_admin_path(path: str) -> bool:
 def is_rate_limited_path(path: str) -> bool:
     """检查是否需要限流"""
     return any(path.startswith(prefix) for prefix in RATE_LIMITED_PATHS)
-
-
-# ============ 全局实例 ============
-
-_secret_manager: Optional[SecretManager] = None
-_api_key_auth: Optional[APIKeyAuth] = None
-_rate_limiter: Optional[RateLimiter] = None
-
-
-def get_secret_manager() -> SecretManager:
-    """获取全局密钥管理器"""
-    global _secret_manager
-    if _secret_manager is None:
-        _secret_manager = SecretManager()
-    return _secret_manager
-
-
-def get_api_key_auth() -> APIKeyAuth:
-    """获取全局 API Key 鉴权器"""
-    global _api_key_auth
-    if _api_key_auth is None:
-        _api_key_auth = APIKeyAuth()
-    return _api_key_auth
-
-
-def get_rate_limiter(requests_per_minute: int = 60) -> RateLimiter:
-    """获取全局限流器"""
-    global _rate_limiter
-    if _rate_limiter is None:
-        _rate_limiter = RateLimiter(requests_per_minute)
-    return _rate_limiter

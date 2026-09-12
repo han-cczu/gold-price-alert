@@ -7,9 +7,15 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from gold_monitor.config import settings
-from gold_monitor.security import SecretManager, APIKeyAuth, RateLimiter, is_admin_path
+from gold_monitor.security import (
+    SecretManager,
+    APIKeyAuth,
+    RateLimiter,
+    is_admin_path,
+    is_rate_limited_path,
+)
 from gold_monitor.state import require_admin_dep
-from gold_monitor.web import app
+from gold_monitor.web import app, create_app
 
 
 # ============ Fernet 加密 ============
@@ -233,6 +239,36 @@ def test_rate_limit_sliding_window_preserves_recent_samples():
     now[0] = 60.0
     assert limiter.is_allowed(peer) == (True, 0)
     assert limiter.is_allowed(peer) == (False, 0)
+
+
+def test_every_api_path_is_rate_limited_but_probes_and_assets_are_not():
+    for path in (
+        "/api/chart/data",
+        "/api/price/current",
+        "/api/collector/gaps",
+        "/api/analysis",
+        "/api/llm/config",
+    ):
+        assert is_rate_limited_path(path), path
+    for path in ("/health", "/metrics", "/", "/static/js/dashboard.js", "/ws/status"):
+        assert not is_rate_limited_path(path), path
+
+
+def test_public_chart_requests_are_rate_limited_per_client(app_settings):
+    """匿名图表聚合请求必须受每客户端配额约束，不能无限占用数据库线程。"""
+    limited = create_app(
+        app_settings.model_copy(update={"rate_limit_per_minute": 3}),
+        background_tasks=False,
+    )
+    with TestClient(limited) as client:
+        statuses = [
+            client.get("/api/chart/data?hours=43800").status_code for _ in range(5)
+        ]
+        assert statuses == [200, 200, 200, 429, 429]
+        rejected = client.get("/api/price/latest")
+        assert rejected.status_code == 429
+        assert rejected.headers["Retry-After"] == "60"
+        assert client.get("/health").status_code != 429
 
 
 def test_provider_trigger_routes_have_admin_dependency():

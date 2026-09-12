@@ -136,7 +136,7 @@ export function createSettings({ request: apiRequest, onChanged }) {
     function updateProviderUrlPreview() {
         let url = element('provider-url').value.trim().replace(/[/]+$/, '');
         if (!url) { element('provider-url-preview').textContent = ''; return; }
-        if (!url.endsWith('/v1') && !url.includes('/v1/')) url += '/v1';
+        if (!/\/v\d+\w*(\/|$)/.test(url)) url += '/v1';
         element('provider-url-preview').textContent = `预览: ${url}/chat/completions`;
     }
     function probeFields() {

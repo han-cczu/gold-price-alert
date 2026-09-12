@@ -7,7 +7,7 @@ import httpx
 import re
 from datetime import datetime, timezone
 from dataclasses import dataclass
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 from .base import BaseDataSource, PriceData
 
@@ -192,15 +192,3 @@ class BankGoldDataSource(BaseDataSource):
         if self._client and not self._client.is_closed:
             await self._client.aclose()
             self._client = None
-
-
-# 全局银行金价数据源实例
-_bank_source: Optional[BankGoldDataSource] = None
-
-
-def get_bank_source() -> BankGoldDataSource:
-    """获取银行金价数据源单例"""
-    global _bank_source
-    if _bank_source is None:
-        _bank_source = BankGoldDataSource()
-    return _bank_source

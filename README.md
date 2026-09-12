@@ -75,15 +75,22 @@ GOLD_LLM_CONFIG_PATH=llm_config.json
 
 模型选择优先级为：显式 provider 参数 → 已保存的模型配置文件 → 应用 Settings。没有配置文件时，Settings 根据环境和 `.env` 生成默认配置；无有效密钥时使用 Mock。已有保存配置不会被 `GOLD_LLM_PROVIDER` 自动覆盖。需要重新使用环境默认值时，在设置中重置配置，或指定新的模型配置路径。
 
+DeepSeek 端点未指定模型时默认使用 `deepseek-v4-flash`；旧别名 `deepseek-chat`、`deepseek-reasoner` 已于 2026-07-24 下线，不再作为兜底。OpenAI 兼容地址只在路径没有版本段时自动补 `/v1`，`/api/paas/v4`、`/v1beta/openai` 一类地址保持原样。
+
 通知配置使用当前应用的环境默认值，再应用已保存的渠道启用状态和字段覆盖。保存配置、测试发送、实际告警使用同一解析路径；变更对后续发送生效。启用 `GOLD_ENABLE_AUTH` 后，在页面设置中填写对应管理员凭证，页面统一发送 `X-Admin-Key`，凭证只保留在当前页面内存中。
 
-启用鉴权时，新建 AI 分析需要管理员凭证，已有智能分析缓存仍可公开读取。限流使用服务器验证的客户端地址；反向代理部署请配置 `GOLD_TRUSTED_PROXY_IPS`，详见 [部署指南](docs/deployment.md)。
+启用鉴权时，新建 AI 分析需要管理员凭证，已有智能分析缓存仍可公开读取；匿名页面只读取公开的 `/api/config` 摘要来标注 AI 卡片。所有 `/api/` 路径共用每客户端每分钟配额（`GOLD_RATE_LIMIT_PER_MINUTE`，默认 60），`/health` 与静态资源不限流。限流使用服务器验证的客户端地址；反向代理部署请配置 `GOLD_TRUSTED_PROXY_IPS`，详见 [部署指南](docs/deployment.md)。
+
+进程启动时先从分析历史恢复 24 小时内、同一供应商和模型的智能分析结果，只有没有可复用结果时才调用模型；每日分析按 UTC 零点调度。
 
 设置 `GOLD_ENCRYPT_API_KEYS=true` 时，必须配置稳定的 `GOLD_SECRET_KEY` 并在重启后保留同一值，否则已有密文无法读取。模型配置文件损坏、解密失败或写入失败会明确报错。
 
 ## 数据含义
 
 - 主图表、告警阈值和本地波动分析以 **USD/oz** 为单位；本地分析和图表先筛选 USD，原始历史仍保留其他币种记录。
+- `/api/price/current` 返回采集器最近一次成功报价；报价过期（超过 `max(30 秒, 3 × 采集间隔)`）时最多每个采集间隔触发一次真实抓取，从未取得报价且抓取失败才返回 503。匿名请求不会额外消耗上游配额或写入数据库。
+- 保留期清理（`GOLD_DATA_RETENTION_DAYS`）在启动时立即执行一次，之后每 24 小时一次；启动时还会为旧数据库补建缺失的索引。
+- 前端依赖的 ECharts、marked、DOMPurify 随包自托管在 `/static/vendor/`，不再从公共 CDN 加载。
 - `fallback` 仅使用真实源，每轮重新尝试高优先级来源；全部失败时明确报错，Mock 只在显式选择时使用。同价报价默认每 300 秒保存一次真实采样，可用 `GOLD_PRICE_HEARTBEAT_SECONDS` 调整。
 - 图表最多返回 2000 个绘图点，覆盖整个所选时间窗口并保留首尾及分桶峰谷；高低价、均价、涨跌幅和 `count` 使用完整窗口数据。`count` 是原始入库样本数，不是绘图点数。
 - API、WebSocket 和导出的时间带 UTC `Z`；旧无时区时间按 UTC 解释，界面转换为浏览器本地时间。
@@ -129,6 +136,7 @@ gold-price-alert/
 │   ├── dependencies.py    # 从请求获取当前实例
 │   ├── cli.py             # 命令行入口
 │   ├── config.py          # Settings
+│   ├── errors.py          # 输入校验、配置错误到 HTTP 状态码的映射
 │   ├── models.py          # ORM 表与 Database 兼容导出
 │   ├── storage/           # 会话、事务、查询和图表聚合
 │   ├── collector.py       # 报价获取与保存编排
@@ -142,7 +150,7 @@ gold-price-alert/
 │   ├── llm_config.py      # 模型配置文件读写
 │   ├── data_lifecycle.py  # 清理、导出、备份和离线恢复
 │   ├── time_utils.py      # UTC 时间约定
-│   └── static/            # HTML、JS modules 与 CSS
+│   └── static/            # HTML、JS modules、CSS 与自托管第三方库
 ├── tests/                 # 后端与前端行为测试
 ├── docs/                  # 契约、计划、验证及部署文档
 ├── Dockerfile
@@ -155,7 +163,7 @@ gold-price-alert/
 - **后端**: Python 3.10+, FastAPI, SQLAlchemy
 - **前端**: ECharts, 原生 JavaScript
 - **数据库**: SQLite
-- **大模型**: Claude / OpenAI / Mock
+- **大模型**: Claude / OpenAI 兼容接口（DeepSeek 等）/ Mock
 
 ## 项目文档
 
@@ -165,6 +173,7 @@ gold-price-alert/
 - [重构计划与验收清单](docs/refactoring-plan.md)
 - [本轮交付、验证结果与限制](docs/refactor-validation.md)
 - [可靠性修复范围与回归记录](docs/reliability-fixes.md)
+- [2026-09-12 加固与修复记录](docs/hardening-2026-09-12.md)
 
 ## License
 

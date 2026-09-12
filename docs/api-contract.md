@@ -78,3 +78,13 @@
 - `/api/collector/config` 增加 `dedupe_max_interval_seconds`，表示同价真实采样的最长保存间隔。
 
 修复范围、回归验证及回退点见 [可靠性修复记录](reliability-fixes.md)。
+
+## 2026-09-12 加固的契约调整
+
+路径与请求形状不变，以下语义调整见 [加固记录](hardening-2026-09-12.md)：
+
+- GET `/api/price/current` 返回采集器最近一次成功报价（含其原始时间戳）；报价过期时最多每个采集间隔触发一次真实抓取，只有从未取得报价且抓取失败才返回 503。不再每次请求都访问上游、写库和评估告警。
+- 所有 `/api/` 路径共用每客户端限流配额，超限返回 429 并带 `Retry-After: 60`；此前仅分析与模型配置接口限流。`/health`、`/metrics`、`/` 和 `/static/` 不限流。
+- GET `/api/config` 新增 `llm_provider_name`（当前平台显示名）与 `llm_enabled`（是否使用真实模型）。
+- 错误分类：输入校验失败返回 400 并带说明；已保存或环境配置不可用（如缺少主密钥无法解密通知配置）返回 503 并带说明；其他内部 `ValueError` 返回 500 与固定文本 `服务器内部错误`，不再把内部异常文本当成 400 返回。
+- WebSocket `alert.data.alert_type` 仍可能为 `breakout_up`、`breakout_down`、`pullback`；页面为这三类补充了图标和样式。

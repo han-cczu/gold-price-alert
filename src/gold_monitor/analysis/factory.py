@@ -21,7 +21,7 @@ def resolve_model(
         return provider.models[0]
     identity = f"{provider.name} {provider.base_url}".lower()
     for names, default in (
-        (("deepseek",), "deepseek-chat"),
+        (("deepseek",), "deepseek-v4-flash"),
         (("qwen", "通义", "dashscope"), "qwen-turbo"),
         (("moonshot", "kimi"), "moonshot-v1-8k"),
         (("zhipu", "glm"), "glm-4"),
